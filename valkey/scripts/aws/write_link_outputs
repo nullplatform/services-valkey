@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$OUTPUT_DIR"
+
+LINK_ID=$(echo "$CONTEXT" | jq -r '.link.id')
+
+OUTPUTS=$(tofu output -json 2>/dev/null || echo '{}')
+
+USER_NAME=$(echo "$OUTPUTS"     | jq -r '.user_name.value     // ""')
+USER_PASSWORD=$(echo "$OUTPUTS" | jq -r '.user_password.value // ""')
+
+if [ -z "$USER_NAME" ]; then
+  echo "ERROR: No user_name output found." >&2
+  exit 1
+fi
+
+if [ -z "$USER_PASSWORD" ]; then
+  echo "ERROR: the user was created but its password could not be read." >&2
+  echo "  Writing the link without it would hand the application credentials" >&2
+  echo "  it cannot authenticate with." >&2
+  exit 1
+fi
+
+ATTRIBUTES=$(jq -n -c \
+  --arg user_name     "$USER_NAME" \
+  --arg user_password "$USER_PASSWORD" \
+  '{
+    user_name:     $user_name,
+    user_password: $user_password
+  }')
+
+echo "Writing link attributes for link ${LINK_ID} (user: ${USER_NAME})"
+
+np link patch --id "$LINK_ID" --body "{\"attributes\": $ATTRIBUTES}"
+
+echo "Link attributes updated."

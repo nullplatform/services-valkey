@@ -113,8 +113,7 @@ dist
 # FuseBox cache
 .fusebox/
 
-# DynamoDB Local files
-.dynamodb/
+
 
 # TernJS port file
 .tern-port
@@ -132,3 +131,24 @@ dist
 # Intellij
 
 .idea
+
+.DS_Store
+
+# OpenTofu / Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+*.tfbackend
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+backend-local.tf
+
+.claude

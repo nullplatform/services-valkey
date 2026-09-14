@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+
+TOFU_ACTION="${TOFU_ACTION:-apply}"
+
+if ! command -v tofu &>/dev/null; then
+  TOFU_VERSION="1.11.6"
+  TOFU_BIN_DIR="/tmp/np-tofu-bin"
+  TOFU_BIN="$TOFU_BIN_DIR/tofu"
+
+  if [ ! -f "$TOFU_BIN" ]; then
+    echo "tofu not found in PATH, installing v${TOFU_VERSION} to ${TOFU_BIN_DIR}..."
+    mkdir -p "$TOFU_BIN_DIR"
+    curl -fsSL \
+      "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" \
+      -o /tmp/tofu.zip
+    unzip -qo /tmp/tofu.zip tofu -d "$TOFU_BIN_DIR"
+    chmod +x "$TOFU_BIN"
+    rm -f /tmp/tofu.zip
+    echo "tofu installed: $("$TOFU_BIN" version | head -1)"
+  else
+    echo "Using cached tofu at ${TOFU_BIN}"
+  fi
+
+  export PATH="$TOFU_BIN_DIR:$PATH"
+fi
+
+cd "$OUTPUT_DIR"
+
+cp -r "$TOFU_MODULE_DIR"/* .
+
+echo "Running: tofu init"
+# shellcheck disable=SC2086
+if ! tofu init $TOFU_INIT_VARIABLES; then
+  echo "" >&2
+  echo "ERROR: tofu init failed in ${OUTPUT_DIR}" >&2
+  echo "" >&2
+  echo "  Aborting before apply: continuing would operate on the wrong state." >&2
+  echo "" >&2
+  echo "  Possible causes:" >&2
+  echo "    - A previous action left a .terraform pointing at another backend key" >&2
+  echo "    - The state bucket is unreachable or the credentials expired" >&2
+  echo "" >&2
+  echo "  How to fix:" >&2
+  echo "    - Make sure each action uses its own OUTPUT_DIR" >&2
+  echo "    - Remove ${OUTPUT_DIR}/.terraform and run the action again" >&2
+  echo "" >&2
+  exit 1
+fi
+
+echo "Running: tofu $TOFU_ACTION"
+# shellcheck disable=SC2086
+tofu "$TOFU_ACTION" -auto-approve $TOFU_VARIABLES

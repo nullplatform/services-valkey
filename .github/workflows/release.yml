@@ -1,0 +1,27 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      existing_tag:
+        description: 'Publish + finalize an existing tag (recovery/backfill)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    uses: nullplatform/actions-nullplatform/.github/workflows/release-publish-oci.yml@main
+    with:
+      image_name: services/valkey
+      existing_tag: ${{ inputs.existing_tag || '' }}
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
+      artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
