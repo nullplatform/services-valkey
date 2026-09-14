@@ -23,9 +23,7 @@
       "additionalProperties": false,
       "required": [
         "endpoint",
-        "valkey_arn",
-        "secret_access_key",
-        "access_key_id"
+        "valkey_arn"
       ],
       "properties": {
         "aws_region": {
@@ -51,22 +49,6 @@
           "visibleOn": [],
           "editableOn": [],
           "description": "Comma-separated subnet IDs the cache is placed in (taken from the account configuration)"
-        },
-        "access_key_id": {
-          "type": "string",
-          "title": "AWS Access Key ID",
-          "config": "aws.accessKeyId",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "Credentials used when no permissions role is configured (taken from the account configuration)"
-        },
-        "secret_access_key": {
-          "type": "string",
-          "title": "AWS Secret Access Key",
-          "config": "aws.secretAccessKey",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "Credentials used when no permissions role is configured (taken from the account configuration)"
         },
         "endpoint": {
           "type": "string",
