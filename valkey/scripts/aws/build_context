@@ -79,24 +79,6 @@ resolve_cache_name() {
   echo "$computed"
 }
 
-apply_static_credentials() {
-  if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-    return 0
-  fi
-
-  local key secret
-  key=$(echo "$SERVICE_ATTRS" | jq -r '.access_key_id // ""')
-  secret=$(echo "$SERVICE_ATTRS" | jq -r '.secret_access_key // ""')
-
-  if [ -z "$key" ] || [ -z "$secret" ]; then
-    return 0
-  fi
-
-  echo "Using the access key from the service attributes"
-  export AWS_ACCESS_KEY_ID="$key"
-  export AWS_SECRET_ACCESS_KEY="$secret"
-}
-
 ensure_tfstate_bucket() {
   local bucket="$1" region="$2"
 
@@ -128,8 +110,6 @@ AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
 if [ -n "$AWS_PROFILE_VAL" ]; then
   export AWS_PROFILE="$AWS_PROFILE_VAL"
 fi
-
-apply_static_credentials
 
 ACCOUNT_NRN=$(echo "$CONTEXT" | jq -r '.service.nrn // .entity_nrn // ""' | sed 's/:namespace=.*$//')
 REGION=$(resolve_region "$(echo "$SERVICE_ATTRS" | jq -r '.aws_region // ""')" "$ACCOUNT_NRN")

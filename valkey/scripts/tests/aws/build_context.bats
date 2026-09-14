@@ -130,15 +130,15 @@ setup() {
 	assert_contains "$captured_stdout" "Using existing tfstate bucket: np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"
 }
 
-@test "exports the static credentials from the attributes when the assume-role step left none" {
+@test "never injects the access key from the service attributes" {
 	run_script build_context
 	[ "$status" -eq 0 ]
-	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "AKIASTATIC"
-	assert_equal "$(captured AWS_SECRET_ACCESS_KEY)" "static-secret"
-	assert_contains "$captured_stdout" "Using the access key from the service attributes"
+	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
+	assert_equal "$(captured AWS_SECRET_ACCESS_KEY)" ""
+	assert_not_contains "$captured_stdout" "AKIASTATIC"
 }
 
-@test "keeps the assumed-role credentials over the static attributes" {
+@test "leaves the credentials from the assume-role step untouched" {
 	export AWS_ACCESS_KEY_ID="ASIAASSUMED"
 	export AWS_SECRET_ACCESS_KEY="assumed-secret"
 	export AWS_SESSION_TOKEN="token"
@@ -146,13 +146,7 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "ASIAASSUMED"
 	assert_equal "$(captured AWS_SECRET_ACCESS_KEY)" "assumed-secret"
-}
-
-@test "leaves the credentials untouched when the attributes carry none" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.parameters.access_key_id, .parameters.secret_access_key)')
-	run_script build_context
-	[ "$status" -eq 0 ]
-	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
+	assert_equal "$(captured AWS_SESSION_TOKEN)" "token"
 }
 
 @test "always applies the aws_profile from values.yaml" {

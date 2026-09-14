@@ -58,7 +58,7 @@ module "valkey_requirements" {
 
 Every service instance keeps its Terraform state in its own S3 bucket (`np-service-<service-id>`), created on demand and removed when the service is deleted. Links use the same bucket under a separate key, so creating or removing a link never touches the cache state.
 
-Before any AWS call, each workflow assumes the permissions role resolved from the IAM provider. When no role is configured, the `access_key_id` and `secret_access_key` attributes are used if the account configuration provides them, and the agent's own credentials otherwise, which is what makes local testing work.
+Before any AWS call, each workflow assumes the permissions role published in the IAM provider under the selector `valkey`, and every later step runs on the temporary credentials it returns. When the provider publishes no role for that selector, the agent keeps its own credentials and uses them directly — which is what makes local testing work, and what a setup that does not use assume-role relies on.
 
 The cache name is `np-<service slug>-<first 5 characters of the service id>`, capped at 36 characters so the derived user group (`-ug`) stays within the ElastiCache limit. It is computed once and then frozen in the service attributes (`cache_name`): renaming the service never renames the cache, and the link workflow reads the same attribute to find the user group it has to join. The `np-` prefix is what scopes the permissions role to caches created by nullplatform.
 
@@ -70,7 +70,7 @@ Serverless caches require TLS. Connect to `$ENDPOINT` on port 6379 with TLS enab
 
 ## Local testing
 
-Set `aws_profile` in `values.yaml`, run `aws sso login --profile <name>`, and start the agent locally. The service falls back to those credentials when no IAM provider is configured.
+Set `aws_profile` in `values.yaml`, run `aws sso login --profile <name>`, and start the agent locally. With no IAM provider configured, the service runs on that profile's credentials.
 
 Unit tests run with [bats-core](https://github.com/bats-core/bats-core):
 
