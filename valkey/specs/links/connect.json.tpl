@@ -21,22 +21,6 @@
         "user_password"
       ],
       "properties": {
-        "aws_region": {
-          "type": "string",
-          "title": "AWS Region",
-          "config": "aws.region",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "Region of the cache (taken from the account configuration)"
-        },
-        "vpc_id": {
-          "type": "string",
-          "title": "VPC",
-          "config": "aws.vpcId",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "VPC of the cache (taken from the account configuration)"
-        },
         "user_name": {
           "type": "string",
           "title": "User Name",
