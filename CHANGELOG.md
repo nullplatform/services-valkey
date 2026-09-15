@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0](https://github.com/nullplatform/services-valkey/compare/0.0.1...v0.1.0) (2026-09-15)
+
+
+### Features
+
+* serverless valkey service with connect link ([218a4ae](https://github.com/nullplatform/services-valkey/commit/218a4ae2a0a32aca3b2ab71dfff0af1bba956ff9))
+
+## Changelog
+
 ## Unreleased
 
 
