@@ -1,0 +1,10 @@
+cluster_name = "<nullplatform agent cluster, e.g. my-org-cluster>"
+state_bucket_name = "<existing S3 bucket for the tofu state, e.g. np-valkey-state>"
+
+# agent_role_arn             = "arn:aws:iam::123456789012:role/nullplatform-my-org-cluster-agent-role"
+# additional_agent_role_arns = ["arn:aws:iam::123456789012:role/another-agent-role"]
+# role_name                  = "nullplatform_my-org-cluster_valkey_role"
+# policies_name_prefix       = "nullplatform_my-org-cluster"
+# cache_name_prefix          = "np-"
+# iam_create_role            = true
+# iam_resource_tags_json     = { managed-by = "nullplatform" }

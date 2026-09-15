@@ -1,0 +1,7 @@
+aws_profile: ""
+
+provider_categories:
+  - identity-access-control
+
+vpc_id: ""
+subnet_ids: ""

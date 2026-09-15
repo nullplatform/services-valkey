@@ -1,0 +1,126 @@
+resource "aws_iam_role" "nullplatform_valkey" {
+  count = local.iam_create ? 1 : 0
+
+  name        = local.role_name
+  description = "Permissions role assumed by the nullplatform agent role for the serverless-valkey service"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = concat([local.agent_role_arn], var.additional_agent_role_arns) }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = local.iam_default_tags
+}
+
+resource "aws_iam_policy" "nullplatform_valkey" {
+  count = local.iam_create ? 1 : 0
+
+  name        = "${local.policies_name_prefix}_valkey_policy"
+  description = "ElastiCache serverless cache, user group and user management for the nullplatform serverless-valkey service"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ManageCaches"
+        Effect   = "Allow"
+        Action   = ["elasticache:*"]
+        Resource = local.managed_elasticache_arns
+      },
+      {
+        Sid    = "ManageUserGroupMembership"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateUserGroup",
+          "elasticache:ModifyUserGroup",
+          "elasticache:DeleteUserGroup",
+        ]
+        Resource = local.all_elasticache_users_arn
+      },
+      {
+        Sid    = "BindCachesToUserGroups"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateServerlessCache",
+          "elasticache:ModifyServerlessCache",
+        ]
+        Resource = local.all_elasticache_usergroups_arn
+      },
+      {
+        Sid    = "AccountLevelReads"
+        Effect = "Allow"
+        Action = [
+          "elasticache:Describe*",
+          "elasticache:ListTagsForResource",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid      = "CreateServiceLinkedRole"
+        Effect   = "Allow"
+        Action   = ["iam:CreateServiceLinkedRole"]
+        Resource = local.elasticache_service_linked_role_arn
+        Condition = {
+          StringLike = { "iam:AWSServiceName" = "elasticache.amazonaws.com" }
+        }
+      },
+    ]
+  })
+
+  tags = local.iam_default_tags
+}
+
+resource "aws_iam_policy" "nullplatform_valkey_state" {
+  count = local.iam_create ? 1 : 0
+
+  name        = "${local.policies_name_prefix}_valkey_state_policy"
+  description = "Terraform state bucket management for the nullplatform serverless-valkey service"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ListStateBucket"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+          "s3:ListBucketVersions",
+          "s3:GetBucketLocation",
+        ]
+        Resource = "arn:aws:s3:::${var.state_bucket_name}"
+      },
+      {
+        Sid    = "ManageStateObjects"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:DeleteObjectVersion",
+        ]
+        Resource = "arn:aws:s3:::${var.state_bucket_name}/*"
+      },
+    ]
+  })
+
+  tags = local.iam_default_tags
+}
+
+resource "aws_iam_role_policy_attachment" "valkey" {
+  count = local.iam_create ? 1 : 0
+
+  role       = aws_iam_role.nullplatform_valkey[0].name
+  policy_arn = aws_iam_policy.nullplatform_valkey[0].arn
+}
+
+resource "aws_iam_role_policy_attachment" "valkey_state" {
+  count = local.iam_create ? 1 : 0
+
+  role       = aws_iam_role.nullplatform_valkey[0].name
+  policy_arn = aws_iam_policy.nullplatform_valkey_state[0].arn
+}

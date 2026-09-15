@@ -1,0 +1,116 @@
+resource "aws_iam_policy" "nullplatform_valkey_network" {
+  count = local.iam_create ? 1 : 0
+
+  name        = "${local.policies_name_prefix}_valkey_network_policy"
+  description = "Security group management for the nullplatform serverless-valkey service"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "CreateSecurityGroupInVpc"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateSecurityGroup"]
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc/*"
+      },
+      {
+        Sid      = "CreateTaggedSecurityGroup"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateSecurityGroup"]
+        Resource = "arn:aws:ec2:*:${local.account_id}:security-group/*"
+        Condition = {
+          StringEquals = { "aws:RequestTag/managed-by" = "nullplatform" }
+        }
+      },
+      {
+        Sid      = "TagSecurityGroupOnCreate"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:*:${local.account_id}:security-group/*"
+        Condition = {
+          StringEquals = { "ec2:CreateAction" = "CreateSecurityGroup" }
+        }
+      },
+      {
+        Sid    = "ManageOwnSecurityGroups"
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteSecurityGroup",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupEgress",
+          "ec2:ModifySecurityGroupRules",
+          "ec2:CreateTags",
+          "ec2:DeleteTags",
+        ]
+        Resource = "arn:aws:ec2:*:${local.account_id}:security-group/*"
+        Condition = {
+          StringEquals = { "aws:ResourceTag/managed-by" = "nullplatform" }
+        }
+      },
+      {
+        Sid      = "CreateElastiCacheVpcEndpoint"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateVpcEndpoint"]
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
+        Condition = {
+          StringEquals = { "aws:RequestTag/AmazonElastiCacheManaged" = "true" }
+        }
+      },
+      {
+        Sid      = "ReferenceNetworkForVpcEndpoint"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateVpcEndpoint"]
+        Resource = local.vpc_endpoint_reference_arns
+      },
+      {
+        Sid      = "TagElastiCacheVpcEndpointOnCreate"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
+        Condition = {
+          StringEquals = { "ec2:CreateAction" = "CreateVpcEndpoint" }
+        }
+      },
+      {
+        Sid    = "ManageElastiCacheVpcEndpoints"
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteVpcEndpoints",
+          "ec2:ModifyVpcEndpoint",
+        ]
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
+        Condition = {
+          StringEquals = { "aws:ResourceTag/AmazonElastiCacheManaged" = "true" }
+        }
+      },
+      {
+        Sid    = "DescribeNetwork"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSecurityGroupRules",
+          "ec2:DescribeVpcs",
+          "ec2:DescribeVpcAttribute",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeTags",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeVpcEndpoints",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribePrefixLists",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+
+  tags = local.iam_default_tags
+}
+
+resource "aws_iam_role_policy_attachment" "valkey_network" {
+  count = local.iam_create ? 1 : 0
+
+  role       = aws_iam_role.nullplatform_valkey[0].name
+  policy_arn = aws_iam_policy.nullplatform_valkey_network[0].arn
+}

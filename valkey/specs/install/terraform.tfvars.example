@@ -1,0 +1,15 @@
+nrn                  = "organization=123:account=456"
+api_key              = "<nullplatform api key>"
+repository_branch    = "v1.0.0"
+agent_tags_selectors = { service = "serverless-valkey" }
+
+# repository_ref_type   = "tags"
+# repository_org        = "nullplatform"
+# repository_name       = "services-valkey"
+# service_name          = "Serverless Valkey"
+# service_path          = "valkey"
+# available_links       = ["connect"]
+# repository_token      = "<token for a private repository>"
+# extra_visible_to_nrns = ["organization=123:account=789"]
+# dimensions            = { environment = { required = true } }
+# channel_description   = "Serverless Valkey service actions"

@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$OUTPUT_DIR"
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+
+OUTPUTS=$(tofu output -json 2>/dev/null || echo '{}')
+
+ENDPOINT=$(echo "$OUTPUTS"   | jq -r '.endpoint.value   // ""')
+PORT=$(echo "$OUTPUTS"       | jq -r '.port.value       // ""')
+VALKEY_ARN=$(echo "$OUTPUTS" | jq -r '.valkey_arn.value // ""')
+CACHE_NAME=$(echo "$OUTPUTS" | jq -r '.cache_name.value // ""')
+
+if [ -z "$ENDPOINT" ]; then
+  echo "WARNING: No endpoint output found. Skipping attribute update."
+  exit 0
+fi
+
+ATTRIBUTES=$(jq -n -c \
+  --arg endpoint   "$ENDPOINT" \
+  --arg port       "$PORT" \
+  --arg valkey_arn "$VALKEY_ARN" \
+  --arg cache_name "$CACHE_NAME" \
+  '{
+    endpoint:   $endpoint,
+    port:       $port,
+    valkey_arn: $valkey_arn,
+    cache_name: $cache_name
+  }')
+
+echo "Writing service attributes for service ${SERVICE_ID}:"
+echo "$ATTRIBUTES" | jq .
+
+np service patch --id "$SERVICE_ID" --body "{\"attributes\": $ATTRIBUTES}"
+
+echo "Service attributes updated."

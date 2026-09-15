@@ -1,18 +1,98 @@
-<h2 align="center">
-    <a href="https://httpie.io" target="blank_">
-        <img height="100" alt="nullplatform" src="https://nullplatform.com/favicon/android-chrome-192x192.png" />
-    </a>
-    <br>
-    <br>
-    Nullplatform "Any Technology" Template
-    <br>
-</h2>
+# services-valkey
 
-This is a minimalistic sample on how you can create an application on arbitrary technology.
-In particular, we're spinning up an image that contains an echo server.
-You can check *Echo Server* documentation [here](https://ealenn.github.io/Echo-Server/).
+Nullplatform service that provisions **AWS ElastiCache Serverless for Valkey** caches and connects them to applications.
 
-## How do I modify this template to build my own application?
+## What it does
 
-1. Change the Dockerfile to run the application / binary that you are building
-2. Deploy your application in nullplatform
+Creates a serverless Valkey cache per service instance, reachable only from inside the VPC, and hands each linked application its own user and password.
+
+| Capability | Notes |
+| :---- | :---- |
+| Engine | Valkey 8, serverless: no node sizing, scales with usage |
+| Network | Placed in the account's VPC and subnets; port 6379 open to the VPC CIDR only; the agent role can only touch security groups tagged `managed-by=nullplatform` |
+| Authentication | RBAC user group per cache; one user per link |
+| Connection | Endpoint, port and a ready-to-use TLS connection URL exported to linked applications |
+
+## Links
+
+| Link | What it does |
+| :---- | :---- |
+| `create-serverless-valkey-link` | Creates a Valkey user with full access (`on ~* +@all`), adds it to the cache's user group and exports `user_name` and `user_password` (secret) to the application. |
+
+## Layout
+
+```
+valkey/
+├── specs/
+│   ├── service-spec.json.tpl      # attributes shown to the developer
+│   ├── links/connect.json.tpl
+│   └── requirements/aws/          # IAM role the agent assumes
+├── deployment/                    # security group, user group and the cache
+├── permissions/                   # link: per-link user and password
+├── scripts/aws/                   # context building and tofu execution
+│   └── tests/aws/                 # BATS unit tests
+├── utils/                         # assume role helpers
+├── entrypoint/                    # action routing
+├── workflows/aws/                 # one file per action
+└── values.yaml                    # static config, not exposed in the UI
+```
+
+## Installation
+
+**1. Create the permissions role.** Apply `valkey/specs/requirements/aws` in the target AWS account:
+
+```hcl
+module "valkey_requirements" {
+  source            = "git::https://github.com/nullplatform/services-valkey.git//valkey/specs/requirements/aws?ref=main"
+  cluster_name      = "<nullplatform agent cluster>"
+  state_bucket_name = "<existing S3 bucket for the tofu state>"
+}
+```
+
+To apply it as a root module instead, copy `terraform.tfvars.example` to `terraform.tfvars` and fill it in — it lists every variable, with the optional ones commented out at their defaults.
+
+**2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
+
+**3. Create the state bucket.** Create a single S3 bucket that every valkey service shares for its tofu state, enable versioning on it, and pass its name to the requirements module as `state_bucket_name`. The agent must receive the same name in the environment variable `VALKEY_S3_STATE_BUCKET`. The service never creates or deletes this bucket: if it is missing, every action fails with a clear error.
+
+Each service keeps its state under `services/<service id>/terraform.tfstate`, and each of its links under `services/<service id>/links/<link id>.tfstate`. Deleting a service removes that prefix and nothing else.
+
+**4. Configure the network.** The service reads `aws_region`, `vpc_id` and `subnet_ids` (comma-separated) from the account configuration (`aws.region`, `aws.vpcId`, `aws.subnetIds`). When the account has none, set `vpc_id` and `subnet_ids` in `values.yaml`.
+
+**5. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list.
+
+## How it works
+
+Every service instance keeps its Terraform state in its own S3 bucket (`np-service-<service-id>`), created on demand and removed when the service is deleted. Links use the same bucket under a separate key, so creating or removing a link never touches the cache state.
+
+Before any AWS call, each workflow assumes the permissions role published in the IAM provider under the selector `valkey`, and every later step runs on the temporary credentials it returns. When the provider publishes no role for that selector, the agent keeps its own credentials and uses them directly — which is what makes local testing work, and what a setup that does not use assume-role relies on.
+
+The cache name is `np-<service slug>-<first 5 characters of the service id>`, capped at 36 characters so the derived user group (`-ug`) stays within the ElastiCache limit. It is computed once and then frozen in the service attributes (`cache_name`): renaming the service never renames the cache, and the link workflow reads the same attribute to find the user group it has to join. The `np-` prefix is what scopes the permissions role to caches created by nullplatform.
+
+Each link user is named `np-<link slug>-<first 5 characters of the link id>-user`. Its password is generated by Terraform, stored only in the link's state and attributes, and delivered to the application as a secret environment variable.
+
+## Connecting
+
+Serverless caches always run with encryption in transit, so every client must connect over TLS.
+
+Linked applications receive:
+
+| Variable | From | |
+| :---- | :---- | :---- |
+| `ENDPOINT` | service | Cache hostname |
+| `PORT` | service | `6379` |
+| `USER_NAME` | link | Valkey user for this link |
+| `USER_PASSWORD` | link | secret |
+| `CONNECTION_URL` | link | `valkeys://<user>:<password>@<endpoint>:<port>`, secret |
+
+Use `CONNECTION_URL` where the client accepts a connection string, or the individual variables otherwise. The `valkeys://` scheme is the TLS form and is understood by valkey-py and valkey-glide; clients that only accept the Redis scheme take the same URL as `rediss://`.
+
+## Local testing
+
+Set `aws_profile` in `values.yaml`, run `aws sso login --profile <name>`, and start the agent locally. With no IAM provider configured, the service runs on that profile's credentials.
+
+Unit tests run with [bats-core](https://github.com/bats-core/bats-core):
+
+```bash
+bats valkey/scripts/tests/aws/ valkey/utils/tests/
+```

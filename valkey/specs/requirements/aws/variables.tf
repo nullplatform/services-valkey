@@ -1,0 +1,61 @@
+variable "agent_role_arn" {
+  description = "ARN of the primary nullplatform agent IRSA role allowed to assume this permissions role via sts:AssumeRole, and always a trusted principal of the role's trust policy. Defaults (when empty) to the conventional agent role for the cluster: arn:aws:iam::<account>:role/nullplatform-<cluster_name>-agent-role."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.agent_role_arn == "" || can(regex("^arn:aws:iam::[0-9]{12}:role/.+", var.agent_role_arn))
+    error_message = "agent_role_arn must be empty (to use the derived default) or match arn:aws:iam::<account-id>:role/<role-name>"
+  }
+}
+
+variable "additional_agent_role_arns" {
+  description = "Extra IAM role ARNs allowed to assume this permissions role, appended to agent_role_arn in the trust policy. Defaults to none."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.additional_agent_role_arns : can(regex("^arn:aws:iam::[0-9]{12}:role/.+", arn))])
+    error_message = "each additional_agent_role_arns entry must match arn:aws:iam::<account-id>:role/<role-name>"
+  }
+}
+
+variable "cluster_name" {
+  description = "Name of the cluster the nullplatform agent runs in. Used only to derive default names for the permissions role, the policy prefix and the agent role ARN. Unrelated to the Valkey cache, which is created per service instance at runtime."
+  type        = string
+}
+
+variable "role_name" {
+  description = "Override for the Valkey permissions IAM role name. Defaults to nullplatform_{cluster_name}_valkey_role."
+  type        = string
+  default     = ""
+}
+
+variable "policies_name_prefix" {
+  description = "Override for the IAM policy name prefix. Defaults to nullplatform_{cluster_name}."
+  type        = string
+  default     = ""
+}
+
+variable "cache_name_prefix" {
+  description = "Prefix of the caches, user groups and users this service manages. The permissions are scoped to resources matching it, so the agent cannot reach ElastiCache resources created outside nullplatform."
+  type        = string
+  default     = "np-"
+}
+
+variable "iam_create_role" {
+  description = "Whether to create the permissions role and its policies. When false, the module produces no resources."
+  type        = bool
+  default     = true
+}
+
+variable "iam_resource_tags_json" {
+  description = "Tags to apply to IAM resources created by this module."
+  type        = map(string)
+  default     = {}
+}
+
+variable "state_bucket_name" {
+  description = "Name of the existing S3 bucket holding the tofu state for every valkey service. The agent receives it as VALKEY_S3_STATE_BUCKET; this grants the permissions role access to it."
+  type        = string
+}

@@ -1,5 +1,15 @@
-FROM hashicorp/http-echo:1.0.0
+# syntax=docker/dockerfile:1
+FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.0.0
 
-CMD ["-text={\"status\":\"ok\",\"msg\":\"Hola mundo\"}", "-listen=:8080", "-status-code=200"]
+RUN apk add --no-cache aws-cli gomplate
 
+ARG TOFU_VERSION=1.10.10
+ARG TARGETARCH
+RUN curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${TARGETARCH}.tar.gz" \
+      | tar -xz -C /usr/local/bin tofu \
+    && tofu version
 
+COPY . /app/pkg
+ENV NP_PACKAGE_NAME=valkey \
+    NP_SERVICE_PATH=/app/pkg/valkey \
+    NP_SCOPE_ENTRYPOINT=/app/pkg/valkey/entrypoint/entrypoint

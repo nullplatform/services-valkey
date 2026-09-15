@@ -1,0 +1,47 @@
+#!/bin/bash
+set -euo pipefail
+
+yaml_value() {
+  local key="$1" default="$2" file="$3"
+  local val
+  val=$(grep "^${key}:" "$file" 2>/dev/null | sed 's/^[^:]*: *//;s/^"//;s/"$//' | head -1)
+  echo "${val:-$default}"
+}
+
+AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
+if [ -n "$AWS_PROFILE_VAL" ]; then
+  export AWS_PROFILE="$AWS_PROFILE_VAL"
+fi
+
+if [ -z "${LINK_ID:-}" ]; then
+  echo "ERROR: LINK_ID is not set. build_context must run before this script." >&2
+  exit 1
+fi
+
+if [ -z "${CACHE_NAME:-}" ]; then
+  echo "ERROR: CACHE_NAME is not set. build_context must run before this script." >&2
+  exit 1
+fi
+
+VALKEY_ARN=$(echo "$CONTEXT" | jq -r '.service.attributes.valkey_arn // ""')
+
+if [ -z "$VALKEY_ARN" ]; then
+  echo "ERROR: the service has no valkey_arn attribute yet." >&2
+  echo "  The cache must be created before a link can be established." >&2
+  exit 1
+fi
+
+USER_GROUP_ID="${CACHE_NAME}-ug"
+
+echo "Link ${LINK_ID} -> cache ${CACHE_NAME} (user: ${LINK_USER_NAME})"
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+
+export OUTPUT_DIR="/tmp/np-link-${LINK_ID}"
+mkdir -p "$OUTPUT_DIR"
+
+export TOFU_MODULE_DIR="$SERVICE_PATH/permissions"
+
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=services/${SERVICE_ID}/links/${LINK_ID}.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
+
+export TOFU_VARIABLES="-var=link_id=${LINK_ID} -var=region=${REGION} -var=user_group_id=${USER_GROUP_ID} -var=user_name=${LINK_USER_NAME}"
