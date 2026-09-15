@@ -23,7 +23,9 @@ setup_mocks() {
 #!/bin/bash
 echo "aws $*" >> "$MOCK_LOG"
 case "$*" in
-	*"s3api head-bucket"*) exit "$MOCK_BUCKET_EXISTS" ;;
+	*"s3api head-bucket"*)
+		[ "$MOCK_BUCKET_EXISTS" = "0" ] && printf '{\n    "BucketArn": "arn:aws:s3:::b",\n    "BucketRegion": "us-east-1",\n    "AccessPointAlias": false\n}\n'
+		exit "$MOCK_BUCKET_EXISTS" ;;
 	*"s3api list-object-versions"*) echo "$MOCK_LIST_VERSIONS" ;;
 	*"s3api delete-objects"*)
 		for arg in "$@"; do

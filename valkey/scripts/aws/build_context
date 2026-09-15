@@ -80,21 +80,20 @@ resolve_cache_name() {
 }
 
 require_state_bucket() {
-  local bucket="${VALKEY_S3_STATE_BUCKET:-}" region="$1"
+  local region="$1"
 
-  if [ -z "$bucket" ]; then
+  if [ -z "${VALKEY_S3_STATE_BUCKET:-}" ]; then
     echo "ERROR: VALKEY_S3_STATE_BUCKET is not set." >&2
     echo "  The agent must provide the name of the S3 bucket holding the tofu state." >&2
     exit 1
   fi
 
-  if ! aws s3api head-bucket --bucket "$bucket" --region "$region" 2>/dev/null; then
-    echo "ERROR: the state bucket ${bucket} does not exist or is not reachable from ${region}." >&2
+  if ! aws s3api head-bucket --bucket "$VALKEY_S3_STATE_BUCKET" --region "$region" >/dev/null 2>&1; then
+    echo "ERROR: the state bucket ${VALKEY_S3_STATE_BUCKET} does not exist or is not reachable from ${region}." >&2
     exit 1
   fi
 
-  echo "Using state bucket: ${bucket}" >&2
-  printf '%s' "$bucket"
+  echo "Using state bucket: ${VALKEY_S3_STATE_BUCKET}"
 }
 
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
@@ -127,7 +126,8 @@ if [ -z "$SUBNET_IDS" ]; then
 fi
 export VPC_ID SUBNET_IDS
 
-TFSTATE_BUCKET=$(require_state_bucket "$REGION")
+require_state_bucket "$REGION"
+TFSTATE_BUCKET="$VALKEY_S3_STATE_BUCKET"
 TFSTATE_KEY="services/${SERVICE_ID}/terraform.tfstate"
 export TFSTATE_BUCKET TFSTATE_KEY
 
