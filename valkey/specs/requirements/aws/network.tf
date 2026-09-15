@@ -40,6 +40,7 @@ resource "aws_iam_policy" "nullplatform_valkey_network" {
           "ec2:AuthorizeSecurityGroupEgress",
           "ec2:RevokeSecurityGroupIngress",
           "ec2:RevokeSecurityGroupEgress",
+          "ec2:ModifySecurityGroupRules",
           "ec2:CreateTags",
           "ec2:DeleteTags",
         ]

@@ -32,6 +32,25 @@ resource "aws_iam_policy" "nullplatform_valkey" {
         Resource = local.managed_elasticache_arns
       },
       {
+        Sid    = "ManageUserGroupMembership"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateUserGroup",
+          "elasticache:ModifyUserGroup",
+          "elasticache:DeleteUserGroup",
+        ]
+        Resource = local.all_elasticache_users_arn
+      },
+      {
+        Sid    = "BindCachesToUserGroups"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateServerlessCache",
+          "elasticache:ModifyServerlessCache",
+        ]
+        Resource = local.all_elasticache_usergroups_arn
+      },
+      {
         Sid    = "AccountLevelReads"
         Effect = "Allow"
         Action = [

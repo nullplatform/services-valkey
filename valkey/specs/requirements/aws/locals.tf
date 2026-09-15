@@ -16,6 +16,9 @@ locals {
     "arn:aws:elasticache:*:${local.account_id}:user:${var.cache_name_prefix}*",
   ]
 
+  all_elasticache_users_arn      = "arn:aws:elasticache:*:${local.account_id}:user:*"
+  all_elasticache_usergroups_arn = "arn:aws:elasticache:*:${local.account_id}:usergroup:*"
+
   elasticache_service_linked_role_arn = "arn:aws:iam::${local.account_id}:role/aws-service-role/elasticache.amazonaws.com/AWSServiceRoleForElastiCache"
 
   iam_default_tags = merge(var.iam_resource_tags_json, {
