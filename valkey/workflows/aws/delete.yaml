@@ -20,6 +20,8 @@ steps:
         type: environment
       - name: TFSTATE_BUCKET
         type: environment
+      - name: SERVICE_ID
+        type: environment
       - name: TOFU_MODULE_DIR
         type: environment
       - name: TOFU_INIT_VARIABLES
@@ -35,4 +37,4 @@ steps:
 
   - name: cleanup tfstate bucket
     type: script
-    file: $SERVICE_PATH/scripts/aws/delete_tfstate_bucket
+    file: $SERVICE_PATH/scripts/aws/delete_tfstate_objects

@@ -94,8 +94,8 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(captured OUTPUT_DIR)" "/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"
 	assert_equal "$(captured TOFU_MODULE_DIR)" "$SERVICE_PATH/deployment"
-	assert_equal "$(captured TFSTATE_BUCKET)" "np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"
-	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -backend-config=key=terraform.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
+	assert_equal "$(captured TFSTATE_BUCKET)" "np-valkey-state"
+	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-valkey-state -backend-config=key=services/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
 	assert_equal "$(captured TOFU_VARIABLES)" "-var=service_id=0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -var=region=us-west-2 -var=cache_name=np-my-cache-0f3a6 -var=vpc_id=vpc-0123 -var=subnet_ids=subnet-a,subnet-b -var-file=/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json"
 }
 
@@ -106,28 +106,32 @@ setup() {
 		'{"account":"acc","account_id":"2","application":"app","application_id":"4","namespace":"ns","namespace_id":"3","organization":"org","organization_id":"1"}'
 }
 
-@test "creates a versioned tfstate bucket with a location constraint outside us-east-1" {
-	export MOCK_BUCKET_EXISTS=1
+@test "fails when VALKEY_S3_STATE_BUCKET is not set" {
+	unset VALKEY_S3_STATE_BUCKET
 	run_script build_context
-	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "aws s3api create-bucket --bucket np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 --region us-west-2 --create-bucket-configuration LocationConstraint=us-west-2"
-	assert_contains "$(cat "$MOCK_LOG")" "aws s3api put-bucket-versioning --bucket np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 --versioning-configuration Status=Enabled"
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: VALKEY_S3_STATE_BUCKET is not set"
 }
 
-@test "creates the tfstate bucket without a location constraint in us-east-1" {
-	export MOCK_BUCKET_EXISTS=1
-	CONTEXT=$(echo "$CONTEXT" | jq '.parameters.aws_region = "us-east-1"')
+@test "fails when VALKEY_S3_STATE_BUCKET is set to an empty value" {
+	export VALKEY_S3_STATE_BUCKET=""
 	run_script build_context
-	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "aws s3api create-bucket --bucket np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 --region us-east-1"
-	assert_not_contains "$(cat "$MOCK_LOG")" "LocationConstraint"
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: VALKEY_S3_STATE_BUCKET is not set"
 }
 
-@test "reuses an existing tfstate bucket" {
+@test "fails when the state bucket does not exist" {
+	export MOCK_BUCKET_EXISTS=1
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: the state bucket np-valkey-state does not exist"
+}
+
+@test "never creates or configures the state bucket" {
 	run_script build_context
 	[ "$status" -eq 0 ]
 	assert_not_contains "$(cat "$MOCK_LOG")" "create-bucket"
-	assert_contains "$captured_stdout" "Using existing tfstate bucket: np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"
+	assert_not_contains "$(cat "$MOCK_LOG")" "put-bucket-versioning"
 }
 
 @test "never injects the access key from the service attributes" {

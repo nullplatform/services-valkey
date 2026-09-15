@@ -54,3 +54,8 @@ variable "iam_resource_tags_json" {
   type        = map(string)
   default     = {}
 }
+
+variable "state_bucket_name" {
+  description = "Name of the existing S3 bucket holding the tofu state for every valkey service. The agent receives it as VALKEY_S3_STATE_BUCKET; this grants the permissions role access to it."
+  type        = string
+}

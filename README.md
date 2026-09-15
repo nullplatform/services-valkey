@@ -43,8 +43,9 @@ valkey/
 
 ```hcl
 module "valkey_requirements" {
-  source       = "git::https://github.com/nullplatform/services-valkey.git//valkey/specs/requirements/aws?ref=main"
-  cluster_name = "<nullplatform agent cluster>"
+  source            = "git::https://github.com/nullplatform/services-valkey.git//valkey/specs/requirements/aws?ref=main"
+  cluster_name      = "<nullplatform agent cluster>"
+  state_bucket_name = "<existing S3 bucket for the tofu state>"
 }
 ```
 
@@ -52,9 +53,13 @@ To apply it as a root module instead, copy `terraform.tfvars.example` to `terraf
 
 **2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
 
-**3. Configure the network.** The service reads `aws_region`, `vpc_id` and `subnet_ids` (comma-separated) from the account configuration (`aws.region`, `aws.vpcId`, `aws.subnetIds`). When the account has none, set `vpc_id` and `subnet_ids` in `values.yaml`.
+**3. Create the state bucket.** Create a single S3 bucket that every valkey service shares for its tofu state, enable versioning on it, and pass its name to the requirements module as `state_bucket_name`. The agent must receive the same name in the environment variable `VALKEY_S3_STATE_BUCKET`. The service never creates or deletes this bucket: if it is missing, every action fails with a clear error.
 
-**4. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list.
+Each service keeps its state under `services/<service id>/terraform.tfstate`, and each of its links under `services/<service id>/links/<link id>.tfstate`. Deleting a service removes that prefix and nothing else.
+
+**4. Configure the network.** The service reads `aws_region`, `vpc_id` and `subnet_ids` (comma-separated) from the account configuration (`aws.region`, `aws.vpcId`, `aws.subnetIds`). When the account has none, set `vpc_id` and `subnet_ids` in `values.yaml`.
+
+**5. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list.
 
 ## How it works
 

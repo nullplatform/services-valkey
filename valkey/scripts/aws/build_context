@@ -79,24 +79,22 @@ resolve_cache_name() {
   echo "$computed"
 }
 
-ensure_tfstate_bucket() {
-  local bucket="$1" region="$2"
+require_state_bucket() {
+  local bucket="${VALKEY_S3_STATE_BUCKET:-}" region="$1"
 
-  if aws s3api head-bucket --bucket "$bucket" --region "$region" 2>/dev/null; then
-    echo "Using existing tfstate bucket: ${bucket}"
-    return 0
+  if [ -z "$bucket" ]; then
+    echo "ERROR: VALKEY_S3_STATE_BUCKET is not set." >&2
+    echo "  The agent must provide the name of the S3 bucket holding the tofu state." >&2
+    exit 1
   fi
 
-  echo "Creating tfstate bucket: ${bucket}"
-  if [ "$region" = "us-east-1" ]; then
-    aws s3api create-bucket --bucket "$bucket" --region "$region"
-  else
-    aws s3api create-bucket --bucket "$bucket" --region "$region" \
-      --create-bucket-configuration LocationConstraint="$region"
+  if ! aws s3api head-bucket --bucket "$bucket" --region "$region" 2>/dev/null; then
+    echo "ERROR: the state bucket ${bucket} does not exist or is not reachable from ${region}." >&2
+    exit 1
   fi
-  aws s3api put-bucket-versioning --bucket "$bucket" \
-    --versioning-configuration Status=Enabled
-  echo "Bucket ${bucket} created with versioning enabled."
+
+  echo "Using state bucket: ${bucket}" >&2
+  printf '%s' "$bucket"
 }
 
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
@@ -129,16 +127,16 @@ if [ -z "$SUBNET_IDS" ]; then
 fi
 export VPC_ID SUBNET_IDS
 
-TFSTATE_BUCKET="np-service-${SERVICE_ID}"
-ensure_tfstate_bucket "$TFSTATE_BUCKET" "$REGION"
-export TFSTATE_BUCKET
+TFSTATE_BUCKET=$(require_state_bucket "$REGION")
+TFSTATE_KEY="services/${SERVICE_ID}/terraform.tfstate"
+export TFSTATE_BUCKET TFSTATE_KEY
 
 export OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 mkdir -p "$OUTPUT_DIR"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
 
-export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=terraform.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY} -backend-config=region=${REGION} -backend-config=use_lockfile=true"
 
 TFVARS_FILE="$OUTPUT_DIR/terraform.tfvars.json"
 echo "$CONTEXT" | jq '{tags: ((.tags // {}) | with_entries(select(.value | type == "string")))}' > "$TFVARS_FILE"

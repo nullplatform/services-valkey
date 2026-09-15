@@ -7,14 +7,16 @@ if [ -z "${REGION:-}" ]; then
 fi
 
 if [ -z "${TFSTATE_BUCKET:-}" ]; then
-  echo "TFSTATE_BUCKET is not set, skipping bucket cleanup."
-  exit 0
+  echo "ERROR: TFSTATE_BUCKET is not set. build_context must run before this script." >&2
+  exit 1
 fi
 
-if ! aws s3api head-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION" 2>/dev/null; then
-  echo "Bucket ${TFSTATE_BUCKET} does not exist, nothing to delete."
-  exit 0
+if [ -z "${SERVICE_ID:-}" ]; then
+  echo "ERROR: SERVICE_ID is not set. build_context must run before this script." >&2
+  exit 1
 fi
+
+PREFIX="services/${SERVICE_ID}/"
 
 delete_objects() {
   local query="$1"
@@ -25,6 +27,7 @@ delete_objects() {
   objects=$(aws s3api list-object-versions \
     --bucket "$TFSTATE_BUCKET" \
     --region "$REGION" \
+    --prefix "$PREFIX" \
     --query "${query}" \
     --output json) || rc=$?
 
@@ -49,9 +52,7 @@ delete_objects() {
   rm -f "$tmpfile"
 }
 
+echo "Deleting tofu state under s3://${TFSTATE_BUCKET}/${PREFIX}"
 delete_objects 'Versions[].{Key:Key,VersionId:VersionId}' "object versions"
 delete_objects 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' "delete markers"
-
-echo "Deleting bucket ${TFSTATE_BUCKET}..."
-aws s3api delete-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION"
-echo "Bucket ${TFSTATE_BUCKET} deleted."
+echo "State under ${PREFIX} deleted."

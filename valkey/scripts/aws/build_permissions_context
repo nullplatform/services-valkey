@@ -35,11 +35,13 @@ USER_GROUP_ID="${CACHE_NAME}-ug"
 
 echo "Link ${LINK_ID} -> cache ${CACHE_NAME} (user: ${LINK_USER_NAME})"
 
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+
 export OUTPUT_DIR="/tmp/np-link-${LINK_ID}"
 mkdir -p "$OUTPUT_DIR"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/permissions"
 
-export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=links/${LINK_ID}.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=services/${SERVICE_ID}/links/${LINK_ID}.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
 
 export TOFU_VARIABLES="-var=link_id=${LINK_ID} -var=region=${REGION} -var=user_group_id=${USER_GROUP_ID} -var=user_name=${LINK_USER_NAME}"
