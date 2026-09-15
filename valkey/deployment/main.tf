@@ -24,6 +24,14 @@ resource "aws_security_group" "cache" {
     cidr_blocks = [data.aws_vpc.cache.cidr_block]
   }
 
+  egress {
+    description = "All outbound inside the VPC"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [data.aws_vpc.cache.cidr_block]
+  }
+
   tags = local.common_tags
 }
 
