@@ -3,6 +3,11 @@ output "endpoint" {
   description = "Hostname applications connect to"
 }
 
+output "port" {
+  value       = aws_elasticache_serverless_cache.cache.endpoint[0].port
+  description = "Port applications connect to, over TLS"
+}
+
 output "valkey_arn" {
   value       = aws_elasticache_serverless_cache.cache.arn
   description = "ARN of the serverless cache"

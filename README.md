@@ -11,7 +11,7 @@ Creates a serverless Valkey cache per service instance, reachable only from insi
 | Engine | Valkey 8, serverless: no node sizing, scales with usage |
 | Network | Placed in the account's VPC and subnets; port 6379 open to the VPC CIDR only; the agent role can only touch security groups tagged `managed-by=nullplatform` |
 | Authentication | RBAC user group per cache; one user per link |
-| Endpoint | Exported to linked applications as an environment variable |
+| Connection | Endpoint, port and a ready-to-use TLS connection URL exported to linked applications |
 
 ## Links
 
@@ -66,7 +66,19 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 
 ## Connecting
 
-Serverless caches require TLS. Connect to `$ENDPOINT` on port 6379 with TLS enabled, authenticating with `$USER_NAME` and `$USER_PASSWORD`.
+Serverless caches always run with encryption in transit, so every client must connect over TLS.
+
+Linked applications receive:
+
+| Variable | From | |
+| :---- | :---- | :---- |
+| `ENDPOINT` | service | Cache hostname |
+| `PORT` | service | `6379` |
+| `USER_NAME` | link | Valkey user for this link |
+| `USER_PASSWORD` | link | secret |
+| `CONNECTION_URL` | link | `valkeys://<user>:<password>@<endpoint>:<port>`, secret |
+
+Use `CONNECTION_URL` where the client accepts a connection string, or the individual variables otherwise. The `valkeys://` scheme is the TLS form and is understood by valkey-py and valkey-glide; clients that only accept the Redis scheme take the same URL as `rediss://`.
 
 ## Local testing
 

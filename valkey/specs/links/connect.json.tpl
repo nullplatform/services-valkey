@@ -18,7 +18,8 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "required": [
         "user_name",
-        "user_password"
+        "user_password",
+        "connection_url"
       ],
       "properties": {
         "user_name": {
@@ -47,6 +48,21 @@
           "editableOn": [],
           "description": "Password of the link user (auto-populated, delivered as secret env var)",
           "order": 2
+        },
+        "connection_url": {
+          "type": "string",
+          "title": "Connection URL",
+          "export": {
+            "type": "environment_variable",
+            "secret": true
+          },
+          "readOnly": true,
+          "visibleOn": [
+            "read"
+          ],
+          "editableOn": [],
+          "description": "Ready-to-use TLS connection string for the link user (auto-populated, delivered as secret env var)",
+          "order": 3
         }
       }
     },

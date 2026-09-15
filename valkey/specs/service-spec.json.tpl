@@ -23,6 +23,7 @@
       "additionalProperties": false,
       "required": [
         "endpoint",
+        "port",
         "valkey_arn"
       ],
       "properties": {
@@ -62,6 +63,18 @@
           "description": "Hostname applications connect to on port 6379 with TLS (auto-populated after creation)",
           "order": 1
         },
+        "port": {
+          "type": "string",
+          "title": "Port",
+          "export": true,
+          "readOnly": true,
+          "visibleOn": [
+            "read"
+          ],
+          "editableOn": [],
+          "description": "Port applications connect to, over TLS (auto-populated after creation)",
+          "order": 2
+        },
         "valkey_arn": {
           "type": "string",
           "title": "Cache ARN",
@@ -72,7 +85,7 @@
           ],
           "editableOn": [],
           "description": "ARN of the serverless cache (auto-populated after creation)",
-          "order": 2
+          "order": 3
         },
         "cache_name": {
           "type": "string",

@@ -10,6 +10,9 @@ OUTPUTS=$(tofu output -json 2>/dev/null || echo '{}')
 USER_NAME=$(echo "$OUTPUTS"     | jq -r '.user_name.value     // ""')
 USER_PASSWORD=$(echo "$OUTPUTS" | jq -r '.user_password.value // ""')
 
+ENDPOINT=$(echo "$CONTEXT" | jq -r '.service.attributes.endpoint // ""')
+PORT=$(echo "$CONTEXT"     | jq -r '.service.attributes.port     // "6379"')
+
 if [ -z "$USER_NAME" ]; then
   echo "ERROR: No user_name output found." >&2
   exit 1
@@ -22,12 +25,22 @@ if [ -z "$USER_PASSWORD" ]; then
   exit 1
 fi
 
+if [ -z "$ENDPOINT" ]; then
+  echo "ERROR: the service has no endpoint attribute yet." >&2
+  echo "  The link user exists but no connection url can be built for it." >&2
+  exit 1
+fi
+
+CONNECTION_URL="valkeys://${USER_NAME}:${USER_PASSWORD}@${ENDPOINT}:${PORT}"
+
 ATTRIBUTES=$(jq -n -c \
-  --arg user_name     "$USER_NAME" \
-  --arg user_password "$USER_PASSWORD" \
+  --arg user_name      "$USER_NAME" \
+  --arg user_password  "$USER_PASSWORD" \
+  --arg connection_url "$CONNECTION_URL" \
   '{
-    user_name:     $user_name,
-    user_password: $user_password
+    user_name:      $user_name,
+    user_password:  $user_password,
+    connection_url: $connection_url
   }')
 
 echo "Writing link attributes for link ${LINK_ID} (user: ${USER_NAME})"
