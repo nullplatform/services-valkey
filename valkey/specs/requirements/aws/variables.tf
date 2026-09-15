@@ -21,7 +21,7 @@ variable "additional_agent_role_arns" {
 }
 
 variable "cluster_name" {
-  description = "Name of the cluster where the agent runs. Used to derive default resource names."
+  description = "Name of the cluster the nullplatform agent runs in. Used only to derive default names for the permissions role, the policy prefix and the agent role ARN. Unrelated to the Valkey cache, which is created per service instance at runtime."
   type        = string
 }
 

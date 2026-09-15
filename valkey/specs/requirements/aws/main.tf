@@ -70,6 +70,8 @@ resource "aws_iam_policy" "nullplatform_valkey_state" {
       Resource = [
         "arn:aws:s3:::np-service-*",
         "arn:aws:s3:::np-service-*/*",
+        "arn:aws:s3:::null-service-provisioning-kwik-e-mart-main",
+        "arn:aws:s3:::null-service-provisioning-kwik-e-mart-main/*",
       ]
     }]
   })

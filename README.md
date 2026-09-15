@@ -44,7 +44,7 @@ valkey/
 ```hcl
 module "valkey_requirements" {
   source       = "git::https://github.com/nullplatform/services-valkey.git//valkey/specs/requirements/aws?ref=main"
-  cluster_name = "<your-cluster>"
+  cluster_name = "<nullplatform agent cluster>"
 }
 ```
 
