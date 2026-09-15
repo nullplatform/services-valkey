@@ -48,6 +48,8 @@ module "valkey_requirements" {
 }
 ```
 
+To apply it as a root module instead, copy `terraform.tfvars.example` to `terraform.tfvars` and fill it in — it lists every variable, with the optional ones commented out at their defaults.
+
 **2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
 
 **3. Configure the network.** The service reads `aws_region`, `vpc_id` and `subnet_ids` (comma-separated) from the account configuration (`aws.region`, `aws.vpcId`, `aws.subnetIds`). When the account has none, set `vpc_id` and `subnet_ids` in `values.yaml`.
