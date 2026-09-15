@@ -53,10 +53,16 @@ resource "aws_iam_policy" "nullplatform_valkey_network" {
         Sid      = "CreateElastiCacheVpcEndpoint"
         Effect   = "Allow"
         Action   = ["ec2:CreateVpcEndpoint"]
-        Resource = local.vpc_endpoint_create_arns
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
         Condition = {
           StringEquals = { "aws:RequestTag/AmazonElastiCacheManaged" = "true" }
         }
+      },
+      {
+        Sid      = "ReferenceNetworkForVpcEndpoint"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateVpcEndpoint"]
+        Resource = local.vpc_endpoint_reference_arns
       },
       {
         Sid      = "TagElastiCacheVpcEndpointOnCreate"

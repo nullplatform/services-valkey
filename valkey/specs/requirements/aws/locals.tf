@@ -19,8 +19,7 @@ locals {
   all_elasticache_users_arn      = "arn:aws:elasticache:*:${local.account_id}:user:*"
   all_elasticache_usergroups_arn = "arn:aws:elasticache:*:${local.account_id}:usergroup:*"
 
-  vpc_endpoint_create_arns = [
-    "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*",
+  vpc_endpoint_reference_arns = [
     "arn:aws:ec2:*:${local.account_id}:vpc/*",
     "arn:aws:ec2:*:${local.account_id}:subnet/*",
     "arn:aws:ec2:*:${local.account_id}:security-group/*",
