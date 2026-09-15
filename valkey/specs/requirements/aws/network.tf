@@ -50,6 +50,36 @@ resource "aws_iam_policy" "nullplatform_valkey_network" {
         }
       },
       {
+        Sid      = "CreateElastiCacheVpcEndpoint"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateVpcEndpoint"]
+        Resource = local.vpc_endpoint_create_arns
+        Condition = {
+          StringEquals = { "aws:RequestTag/AmazonElastiCacheManaged" = "true" }
+        }
+      },
+      {
+        Sid      = "TagElastiCacheVpcEndpointOnCreate"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
+        Condition = {
+          StringEquals = { "ec2:CreateAction" = "CreateVpcEndpoint" }
+        }
+      },
+      {
+        Sid    = "ManageElastiCacheVpcEndpoints"
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteVpcEndpoints",
+          "ec2:ModifyVpcEndpoint",
+        ]
+        Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
+        Condition = {
+          StringEquals = { "aws:ResourceTag/AmazonElastiCacheManaged" = "true" }
+        }
+      },
+      {
         Sid    = "DescribeNetwork"
         Effect = "Allow"
         Action = [
@@ -60,6 +90,9 @@ resource "aws_iam_policy" "nullplatform_valkey_network" {
           "ec2:DescribeSubnets",
           "ec2:DescribeTags",
           "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeVpcEndpoints",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribePrefixLists",
         ]
         Resource = "*"
       },

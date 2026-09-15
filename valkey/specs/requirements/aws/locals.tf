@@ -19,6 +19,14 @@ locals {
   all_elasticache_users_arn      = "arn:aws:elasticache:*:${local.account_id}:user:*"
   all_elasticache_usergroups_arn = "arn:aws:elasticache:*:${local.account_id}:usergroup:*"
 
+  vpc_endpoint_create_arns = [
+    "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*",
+    "arn:aws:ec2:*:${local.account_id}:vpc/*",
+    "arn:aws:ec2:*:${local.account_id}:subnet/*",
+    "arn:aws:ec2:*:${local.account_id}:security-group/*",
+    "arn:aws:ec2:*:${local.account_id}:route-table/*",
+  ]
+
   elasticache_service_linked_role_arn = "arn:aws:iam::${local.account_id}:role/aws-service-role/elasticache.amazonaws.com/AWSServiceRoleForElastiCache"
 
   iam_default_tags = merge(var.iam_resource_tags_json, {
