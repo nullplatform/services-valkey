@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1](https://github.com/nullplatform/services-valkey/compare/v0.2.0...v0.2.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **ci:** auto-merge the release PR from workflow_run; Dependabot commits as fix(deps) ([a894cce](https://github.com/nullplatform/services-valkey/commit/a894cce5f56a47daabad403bc23eb59662d36310))
+* **ci:** merge the release PR from workflow_run instead of the gated pull_request trigger ([5cfc732](https://github.com/nullplatform/services-valkey/commit/5cfc732b6827d583208ff2b9341a2c7c70f2e9a9))
+* **deps:** dependabot commits as fix(deps) so the base image bump gets released ([a705d38](https://github.com/nullplatform/services-valkey/commit/a705d38bb13ccb06045663f70a30145442167728))
+
 ## [0.2.0](https://github.com/nullplatform/services-valkey/compare/v0.1.0...v0.2.0) (2026-09-17)
 
 
