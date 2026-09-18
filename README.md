@@ -63,7 +63,7 @@ Each service keeps its state under `services/<service id>/terraform.tfstate`, an
 
 ## How it works
 
-Every service instance keeps its Terraform state in its own S3 bucket (`np-service-<service-id>`), created on demand and removed when the service is deleted. Links use the same bucket under a separate key, so creating or removing a link never touches the cache state.
+Every service instance keeps its Terraform state in the shared bucket named by `VALKEY_S3_STATE_BUCKET`, under its own key. Links use the same bucket under a separate key, so creating or removing a link never touches the cache state.
 
 Before any AWS call, each workflow assumes the permissions role published in the IAM provider under the selector `valkey`, and every later step runs on the temporary credentials it returns. When the provider publishes no role for that selector, the agent keeps its own credentials and uses them directly — which is what makes local testing work, and what a setup that does not use assume-role relies on.
 
