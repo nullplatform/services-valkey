@@ -79,8 +79,23 @@ resolve_cache_name() {
   echo "$computed"
 }
 
+head_state_bucket() {
+  local bucket="$1" region="$2" failure status=0
+
+  failure=$(aws s3api head-bucket --bucket "$bucket" --region "$region" 2>&1 >/dev/null) || status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+
+  echo "$failure" | sed '/^[[:space:]]*$/d'
+  case "$failure" in
+  *"(404)"* | *"Not Found"* | *NoSuchBucket*) return 2 ;;
+  esac
+  return 1
+}
+
 require_state_bucket() {
-  local region="$1"
+  local region="$1" failure status
 
   if [ -z "${VALKEY_S3_STATE_BUCKET:-}" ]; then
     echo "ERROR: VALKEY_S3_STATE_BUCKET is not set." >&2
@@ -88,8 +103,21 @@ require_state_bucket() {
     exit 1
   fi
 
-  if ! aws s3api head-bucket --bucket "$VALKEY_S3_STATE_BUCKET" --region "$region" >/dev/null 2>&1; then
-    echo "ERROR: the state bucket ${VALKEY_S3_STATE_BUCKET} does not exist or is not reachable from ${region}." >&2
+  status=0
+  failure=$(head_state_bucket "$VALKEY_S3_STATE_BUCKET" "$region") || status=$?
+
+  if [ "$status" -eq 2 ]; then
+    echo "ERROR: the state bucket ${VALKEY_S3_STATE_BUCKET} does not exist in ${region}." >&2
+    echo "  Create it once, enable versioning on it, and pass the same name as state_bucket_name to specs/requirements/aws." >&2
+    echo "  ${failure}" >&2
+    exit 1
+  fi
+
+  if [ "$status" -ne 0 ]; then
+    echo "ERROR: could not verify the state bucket ${VALKEY_S3_STATE_BUCKET} from ${region}." >&2
+    echo "  The bucket may exist in another account, or the assumed role may not grant s3:ListBucket on arn:aws:s3:::${VALKEY_S3_STATE_BUCKET}." >&2
+    echo "  Check that VALKEY_S3_STATE_BUCKET matches state_bucket_name in specs/requirements/aws." >&2
+    echo "  ${failure}" >&2
     exit 1
   fi
 
