@@ -121,10 +121,22 @@ setup() {
 }
 
 @test "fails when the state bucket does not exist" {
-	export MOCK_BUCKET_EXISTS=1
+	export MOCK_HEAD_BUCKET=404
 	run_script build_context
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "ERROR: the state bucket np-valkey-state does not exist"
+	assert_contains "$captured_stderr" "An error occurred (404)"
+}
+
+@test "reports a denied head-bucket as a permissions failure, not a missing bucket" {
+	export MOCK_HEAD_BUCKET=403
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_not_contains "$captured_stderr" "does not exist"
+	assert_contains "$captured_stderr" "ERROR: could not verify the state bucket np-valkey-state"
+	assert_contains "$captured_stderr" "An error occurred (403)"
+	assert_contains "$captured_stderr" "s3:ListBucket on arn:aws:s3:::np-valkey-state"
+	assert_contains "$captured_stderr" "state_bucket_name"
 }
 
 @test "never creates or configures the state bucket" {
