@@ -20,7 +20,7 @@ steps:
         type: environment
       - name: TFSTATE_BUCKET
         type: environment
-      - name: SERVICE_ID
+      - name: TFSTATE_KEY_PREFIX
         type: environment
       - name: TOFU_MODULE_DIR
         type: environment

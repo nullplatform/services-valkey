@@ -20,6 +20,8 @@ steps:
         type: environment
       - name: TFSTATE_BUCKET
         type: environment
+      - name: TFSTATE_KEY_PREFIX
+        type: environment
       - name: CACHE_NAME
         type: environment
       - name: LINK_ID

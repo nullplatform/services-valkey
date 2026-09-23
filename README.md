@@ -55,7 +55,7 @@ To apply it as a root module instead, copy `terraform.tfvars.example` to `terraf
 
 **3. Create the state bucket.** Create a single S3 bucket that every valkey service shares for its tofu state, enable versioning on it, and pass its name to the requirements module as `state_bucket_name`. The agent must receive the same name in the environment variable `VALKEY_S3_STATE_BUCKET`. The service never creates or deletes this bucket: if it is missing, every action fails with a clear error.
 
-Each service keeps its state under `services/<service id>/terraform.tfstate`, and each of its links under `services/<service id>/links/<link id>.tfstate`. Deleting a service removes that prefix and nothing else.
+Each service keeps its state under `services/valkey/<service id>/terraform.tfstate`, and each of its links under `services/valkey/<service id>/links/<link id>.tfstate`. Deleting a service removes that prefix and nothing else.
 
 **4. Configure the network.** The service reads `aws_region`, `vpc_id` and `subnet_ids` (comma-separated) from the account configuration (`aws.region`, `aws.vpcId`, `aws.subnetIds`). When the account has none, set `vpc_id` and `subnet_ids` in `values.yaml`.
 
