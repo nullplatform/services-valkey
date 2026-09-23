@@ -17,9 +17,9 @@ resource "aws_security_group" "cache" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "Valkey from the VPC"
+    description = "Valkey primary and reader endpoints from the VPC"
     from_port   = 6379
-    to_port     = 6379
+    to_port     = 6380
     protocol    = "tcp"
     cidr_blocks = [data.aws_vpc.cache.cidr_block]
   }
