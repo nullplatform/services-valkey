@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/nullplatform/services-valkey/compare/v0.2.1...v0.2.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* install the pinned tofu when the cached one is older ([#10](https://github.com/nullplatform/services-valkey/issues/10)) ([436458d](https://github.com/nullplatform/services-valkey/commit/436458dfee86f85234d3b62976e950c3bc4d2fe2))
+* namespace the tofu state under services/valkey/&lt;service-id&gt; ([#17](https://github.com/nullplatform/services-valkey/issues/17)) ([08616f5](https://github.com/nullplatform/services-valkey/commit/08616f53b656d5db7a921f03ab3f97541936c360))
+
 ## [0.2.1](https://github.com/nullplatform/services-valkey/compare/v0.2.0...v0.2.1) (2026-09-17)
 
 
