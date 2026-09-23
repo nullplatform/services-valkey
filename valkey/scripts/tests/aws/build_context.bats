@@ -95,7 +95,8 @@ setup() {
 	assert_equal "$(captured OUTPUT_DIR)" "/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"
 	assert_equal "$(captured TOFU_MODULE_DIR)" "$SERVICE_PATH/deployment"
 	assert_equal "$(captured TFSTATE_BUCKET)" "np-valkey-state"
-	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-valkey-state -backend-config=key=services/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
+	assert_equal "$(captured TFSTATE_KEY_PREFIX)" "services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/"
+	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-valkey-state -backend-config=key=services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
 	assert_equal "$(captured TOFU_VARIABLES)" "-var=service_id=0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -var=region=us-west-2 -var=cache_name=np-my-cache-0f3a6 -var=vpc_id=vpc-0123 -var=subnet_ids=subnet-a,subnet-b -var-file=/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json"
 }
 

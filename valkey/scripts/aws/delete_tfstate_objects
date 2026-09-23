@@ -11,12 +11,12 @@ if [ -z "${TFSTATE_BUCKET:-}" ]; then
   exit 1
 fi
 
-if [ -z "${SERVICE_ID:-}" ]; then
-  echo "ERROR: SERVICE_ID is not set. build_context must run before this script." >&2
+if [ -z "${TFSTATE_KEY_PREFIX:-}" ]; then
+  echo "ERROR: TFSTATE_KEY_PREFIX is not set. build_context must run before this script." >&2
   exit 1
 fi
 
-PREFIX="services/${SERVICE_ID}/"
+PREFIX="$TFSTATE_KEY_PREFIX"
 
 delete_objects() {
   local query="$1"

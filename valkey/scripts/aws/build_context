@@ -128,15 +128,16 @@ export VPC_ID SUBNET_IDS
 
 require_state_bucket "$REGION"
 TFSTATE_BUCKET="$VALKEY_S3_STATE_BUCKET"
-TFSTATE_KEY="services/${SERVICE_ID}/terraform.tfstate"
-export TFSTATE_BUCKET TFSTATE_KEY
+TFSTATE_KEY_PREFIX="services/valkey/${SERVICE_ID}/"
+export TFSTATE_BUCKET TFSTATE_KEY_PREFIX
+echo "Using state prefix: ${TFSTATE_KEY_PREFIX}"
 
 export OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 mkdir -p "$OUTPUT_DIR"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
 
-export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY} -backend-config=region=${REGION} -backend-config=use_lockfile=true"
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
 
 TFVARS_FILE="$OUTPUT_DIR/terraform.tfvars.json"
 echo "$CONTEXT" | jq '{tags: ((.tags // {}) | with_entries(select(.value | type == "string")))}' > "$TFVARS_FILE"
