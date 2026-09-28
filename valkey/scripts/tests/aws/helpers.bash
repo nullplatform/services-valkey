@@ -11,6 +11,7 @@ setup_mocks() {
 	export SERVICE_PATH MOCK_LOG VALUES
 	export PATH="$MOCK_BIN:$PATH"
 	export MOCK_BUCKET_EXISTS="${MOCK_BUCKET_EXISTS:-0}"
+	export MOCK_TOFU_VERSION="${MOCK_TOFU_VERSION-1.12.6}"
 	export MOCK_TOFU_OUTPUTS="${MOCK_TOFU_OUTPUTS:-{\}}"
 	export MOCK_TOFU_EXIT="${MOCK_TOFU_EXIT:-0}"
 	export MOCK_NP_PROVIDERS="${MOCK_NP_PROVIDERS:-{\"results\":[]\}}"
@@ -50,6 +51,7 @@ MOCK
 #!/bin/bash
 echo "tofu $*" >> "$MOCK_LOG"
 case "$1" in
+	version) echo "OpenTofu v${MOCK_TOFU_VERSION}" ;;
 	output) echo "$MOCK_TOFU_OUTPUTS" ;;
 	init|apply|destroy) exit "$MOCK_TOFU_EXIT" ;;
 esac
