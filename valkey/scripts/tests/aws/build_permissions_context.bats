@@ -19,6 +19,7 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(captured OUTPUT_DIR)" "/tmp/np-link-7d9e2f10-1234-4abc-9def-0123456789ab"
 	assert_equal "$(captured TOFU_MODULE_DIR)" "$SERVICE_PATH/permissions"
+	assert_equal "$(captured TFSTATE_LINK_PREFIX)" "services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/links/7d9e2f10-1234-4abc-9def-0123456789ab.tfstate"
 	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-valkey-state -backend-config=key=services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/links/7d9e2f10-1234-4abc-9def-0123456789ab.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
 	assert_equal "$(captured TOFU_VARIABLES)" "-var=link_id=7d9e2f10-1234-4abc-9def-0123456789ab -var=region=us-west-2 -var=user_group_id=np-my-cache-0f3a6-ug -var=user_name=np-orders-api-7d9e2-user"
 	assert_contains "$captured_stdout" "Link 7d9e2f10-1234-4abc-9def-0123456789ab -> cache np-my-cache-0f3a6 (user: np-orders-api-7d9e2-user)"
