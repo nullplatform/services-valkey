@@ -10,7 +10,7 @@ setup_mocks() {
 	printf 'aws_profile: ""\n' > "$VALUES"
 	export SERVICE_PATH MOCK_LOG VALUES
 	export PATH="$MOCK_BIN:$PATH"
-	export MOCK_BUCKET_EXISTS="${MOCK_BUCKET_EXISTS:-0}"
+	export MOCK_HEAD_BUCKET="${MOCK_HEAD_BUCKET-ok}"
 	export MOCK_TOFU_OUTPUTS="${MOCK_TOFU_OUTPUTS:-{\}}"
 	export MOCK_TOFU_EXIT="${MOCK_TOFU_EXIT:-0}"
 	export MOCK_NP_PROVIDERS="${MOCK_NP_PROVIDERS:-{\"results\":[]\}}"
@@ -24,8 +24,11 @@ setup_mocks() {
 echo "aws $*" >> "$MOCK_LOG"
 case "$*" in
 	*"s3api head-bucket"*)
-		[ "$MOCK_BUCKET_EXISTS" = "0" ] && printf '{\n    "BucketArn": "arn:aws:s3:::b",\n    "BucketRegion": "us-east-1",\n    "AccessPointAlias": false\n}\n'
-		exit "$MOCK_BUCKET_EXISTS" ;;
+		case "$MOCK_HEAD_BUCKET" in
+		ok) printf '{\n    "BucketArn": "arn:aws:s3:::b",\n    "BucketRegion": "us-east-1",\n    "AccessPointAlias": false\n}\n' ;;
+		404) printf '\nAn error occurred (404) when calling the HeadBucket operation: Not Found\n' >&2; exit 254 ;;
+		*) printf '\nAn error occurred (%s) when calling the HeadBucket operation: Forbidden\n' "$MOCK_HEAD_BUCKET" >&2; exit 254 ;;
+		esac ;;
 	*"s3api list-object-versions"*) echo "$MOCK_LIST_VERSIONS" ;;
 	*"s3api delete-objects"*)
 		for arg in "$@"; do
