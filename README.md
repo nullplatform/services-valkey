@@ -11,6 +11,7 @@ Creates a serverless Valkey cache per service instance, reachable only from insi
 | Engine | Valkey 8, serverless: no node sizing, scales with usage |
 | Network | Placed in the account's VPC and subnets; port 6379 open to the VPC CIDR only; the agent role can only touch security groups tagged `managed-by=nullplatform` |
 | Authentication | RBAC user group per cache; one user per link |
+| Encryption | At rest with a dedicated KMS key per cache, or a shared key given to the agent; in transit always |
 | Connection | Endpoint, port and a ready-to-use TLS connection URL exported to linked applications |
 
 ## Links
@@ -59,7 +60,9 @@ Each service keeps its state under `services/valkey/<service id>/terraform.tfsta
 
 **4. Configure the network.** The service reads `aws_region`, `vpc_id` and `subnet_ids` (comma-separated) from the account configuration (`aws.region`, `aws.vpcId`, `aws.subnetIds`). When the account has none, set `vpc_id` and `subnet_ids` in `values.yaml`.
 
-**5. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list.
+**5. Choose the encryption key.** Each cache gets its own KMS key by default and nothing else is needed. To put every cache on one existing key instead, give the agent its ARN in `VALKEY_KMS_KEY_ARN` and list the same ARN in the requirements module as `external_kms_key_arns`, which is what lets the role use it. The key is read only when the cache is created: ElastiCache cannot re-key a serverless cache, so changing the variable later leaves existing caches on the key they were created with.
+
+**6. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list.
 
 ## How it works
 

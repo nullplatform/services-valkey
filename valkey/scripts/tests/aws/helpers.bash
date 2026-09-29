@@ -16,6 +16,7 @@ setup_mocks() {
 	export MOCK_NP_PROVIDERS="${MOCK_NP_PROVIDERS:-{\"results\":[]\}}"
 	export MOCK_NP_PROVIDER="${MOCK_NP_PROVIDER:-{\}}"
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
+	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
 	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE
 	export VALKEY_S3_STATE_BUCKET="${VALKEY_S3_STATE_BUCKET-np-valkey-state}"
 
@@ -26,6 +27,28 @@ case "$*" in
 	*"s3api head-bucket"*)
 		[ "$MOCK_BUCKET_EXISTS" = "0" ] && printf '{\n    "BucketArn": "arn:aws:s3:::b",\n    "BucketRegion": "us-east-1",\n    "AccessPointAlias": false\n}\n'
 		exit "$MOCK_BUCKET_EXISTS" ;;
+	"s3 cp "*)
+		case "$MOCK_STATE_JSON" in
+		missing) echo "fatal error: An error occurred (404) when calling the HeadObject operation: Not Found" >&2; exit 1 ;;
+		denied) echo "fatal error: An error occurred (AccessDenied) when calling the HeadObject operation: Forbidden" >&2; exit 1 ;;
+		*)
+			dest=""
+			prev=""
+			for arg in "$@"; do
+				skip=0
+				case "$prev" in --*) skip=1 ;; esac
+				case "$arg" in s3 | cp | s3://* | --*) skip=1 ;; esac
+				if [ "$skip" = "0" ] && [ -z "$dest" ]; then
+					dest="$arg"
+				fi
+				prev="$arg"
+			done
+			if [ -z "$dest" ]; then
+				echo "mock: could not parse the s3 cp destination from: $*" >&2
+				exit 1
+			fi
+			printf '%s' "$MOCK_STATE_JSON" > "$dest" ;;
+		esac ;;
 	*"s3api list-object-versions"*) echo "$MOCK_LIST_VERSIONS" ;;
 	*"s3api delete-objects"*)
 		for arg in "$@"; do

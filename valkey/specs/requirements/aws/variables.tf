@@ -59,3 +59,14 @@ variable "state_bucket_name" {
   description = "Name of the existing S3 bucket holding the tofu state for every valkey service. The agent receives it as VALKEY_S3_STATE_BUCKET; this grants the permissions role access to it."
   type        = string
 }
+
+variable "external_kms_key_arns" {
+  description = "ARNs of existing KMS keys the agent may pass as VALKEY_KMS_KEY_ARN. The role gets DescribeKey and CreateGrant on these keys only. Leave empty when every cache should get its own dedicated key."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.external_kms_key_arns : can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$", arn))])
+    error_message = "each external_kms_key_arns entry must match arn:aws:kms:<region>:<account-id>:key/<key-id>"
+  }
+}

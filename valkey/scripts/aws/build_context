@@ -79,6 +79,46 @@ resolve_cache_name() {
   echo "$computed"
 }
 
+kms_key_from_state() {
+  local bucket="$1" key="$2" region="$3" destination="$4" failure
+
+  if ! failure=$(aws s3 cp "s3://${bucket}/${key}" "$destination" --region "$region" 2>&1 >/dev/null); then
+    case "$failure" in
+    *"(404)"* | *NoSuchKey* | *"does not exist"*) return 2 ;;
+    esac
+    echo "$failure" | sed '/^[[:space:]]*$/d' >&2
+    return 1
+  fi
+
+  jq -r '
+    [.resources[]? | select(.mode == "managed")] as $resources
+    | ($resources | map(select(.type == "aws_elasticache_serverless_cache" and .name == "cache")) | .[0].instances[0].attributes.kms_key_id // "") as $cache_key
+    | if $cache_key == "" then ""
+      elif ($resources | any(.type == "aws_kms_key" and .name == "cache")) then "managed"
+      else $cache_key end' "$destination"
+}
+
+resolve_kms_key_arn() {
+  local action_type="$1" state_key="$2" resolved=""
+
+  case "$state_key" in
+  managed) resolved="" ;;
+  "")
+    if [ "$action_type" = "create" ]; then
+      resolved="${VALKEY_KMS_KEY_ARN:-}"
+    fi
+    ;;
+  *) resolved="$state_key" ;;
+  esac
+
+  if [ -n "$resolved" ] && [[ ! "$resolved" =~ ^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$ ]]; then
+    echo "ERROR: '${resolved}' is not a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)." >&2
+    exit 1
+  fi
+
+  echo "$resolved"
+}
+
 require_state_bucket() {
   local region="$1"
 
@@ -142,7 +182,24 @@ export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-co
 TFVARS_FILE="$OUTPUT_DIR/terraform.tfvars.json"
 echo "$CONTEXT" | jq '{tags: ((.tags // {}) | with_entries(select(.value | type == "string")))}' > "$TFVARS_FILE"
 
-export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var=subnet_ids=${SUBNET_IDS} -var-file=${TFVARS_FILE}"
+TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var=subnet_ids=${SUBNET_IDS} -var-file=${TFVARS_FILE}"
+
+STATE_STATUS=0
+STATE_KMS_KEY=$(kms_key_from_state "$TFSTATE_BUCKET" "${TFSTATE_KEY_PREFIX}terraform.tfstate" "$REGION" "$OUTPUT_DIR/previous-state.json") || STATE_STATUS=$?
+
+if [ "$STATE_STATUS" -eq 1 ]; then
+  echo "ERROR: could not read the tofu state at s3://${TFSTATE_BUCKET}/${TFSTATE_KEY_PREFIX}terraform.tfstate to find the cache's KMS key." >&2
+  exit 1
+fi
+
+KMS_KEY_ARN=$(resolve_kms_key_arn "$(echo "$CONTEXT" | jq -r '.type // ""')" "$STATE_KMS_KEY")
+
+if [ -n "$KMS_KEY_ARN" ]; then
+  echo "Using external KMS key: ${KMS_KEY_ARN}"
+  TOFU_VARIABLES="${TOFU_VARIABLES} -var=kms_key_arn=${KMS_KEY_ARN}"
+fi
+
+export TOFU_VARIABLES
 
 if [ "${ACTION_SOURCE:-}" = "link" ]; then
   LINK_ID=$(echo "$CONTEXT" | jq -r '.link.id // ""')
