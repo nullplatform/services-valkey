@@ -32,6 +32,9 @@ resource "aws_iam_policy" "nullplatform_valkey_kms" {
           "kms:CreateGrant",
           "kms:ListGrants",
           "kms:RevokeGrant",
+          "kms:CreateAlias",
+          "kms:DeleteAlias",
+          "kms:UpdateAlias",
         ]
         Resource = "*"
         Condition = {
