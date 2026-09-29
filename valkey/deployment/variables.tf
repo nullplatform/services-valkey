@@ -38,3 +38,9 @@ variable "tags" {
   default     = {}
   description = "Extra tags applied to every resource"
 }
+
+variable "kms_key_arn" {
+  type        = string
+  default     = null
+  description = "ARN of an existing KMS key for the cache's at-rest encryption. When null, the module creates a dedicated key for this cache."
+}

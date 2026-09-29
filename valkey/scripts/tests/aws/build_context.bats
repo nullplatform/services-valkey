@@ -199,3 +199,59 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(captured SUBNET_IDS)" "subnet-a,subnet-b"
 }
+
+@test "passes the configured kms key on create when there is no state yet" {
+	export VALKEY_KMS_KEY_ARN="arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+	CONTEXT=$(service_context '{}' "$(full_params)" | jq '.type = "create"')
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=kms_key_arn=arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+}
+
+@test "creates a dedicated key when no kms key is configured" {
+	CONTEXT=$(service_context '{}' "$(full_params)" | jq '.type = "create"')
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_not_contains "$(captured TOFU_VARIABLES)" "kms_key_arn"
+}
+
+@test "keeps the module managing its own key when the state already owns one" {
+	export VALKEY_KMS_KEY_ARN="arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_kms_key","name":"cache","instances":[{"attributes":{"arn":"arn:aws:kms:us-west-2:222222222222:key/99999999-9999-9999-9999-999999999999"}}]},{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"kms_key_id":"arn:aws:kms:us-west-2:222222222222:key/99999999-9999-9999-9999-999999999999"}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_not_contains "$(captured TOFU_VARIABLES)" "kms_key_arn"
+}
+
+@test "reuses the external key recorded in the state instead of the configured one" {
+	export VALKEY_KMS_KEY_ARN="arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"kms_key_id":"arn:aws:kms:us-west-2:222222222222:key/99999999-9999-9999-9999-999999999999"}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=kms_key_arn=arn:aws:kms:us-west-2:222222222222:key/99999999-9999-9999-9999-999999999999"
+	assert_not_contains "$(captured TOFU_VARIABLES)" "arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+}
+
+@test "ignores the configured key on actions other than create" {
+	export VALKEY_KMS_KEY_ARN="arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+	CONTEXT=$(service_context '{}' "$(full_params)" | jq '.type = "update"')
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_not_contains "$(captured TOFU_VARIABLES)" "kms_key_arn"
+}
+
+@test "fails when the configured kms key is not a key arn" {
+	export VALKEY_KMS_KEY_ARN="alias/my-key"
+	CONTEXT=$(service_context '{}' "$(full_params)" | jq '.type = "create"')
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "is not a KMS key ARN"
+}
+
+@test "fails instead of guessing when the state cannot be read" {
+	export MOCK_STATE_JSON="denied"
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "could not read the tofu state"
+	assert_contains "$captured_stderr" "AccessDenied"
+}

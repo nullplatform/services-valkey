@@ -35,6 +35,22 @@ resource "aws_security_group" "cache" {
   tags = local.common_tags
 }
 
+resource "aws_kms_key" "cache" {
+  count = var.kms_key_arn == null ? 1 : 0
+
+  description         = "Customer managed key for the ${var.cache_name} Valkey serverless cache"
+  enable_key_rotation = true
+
+  tags = local.common_tags
+}
+
+resource "aws_kms_alias" "cache" {
+  count = var.kms_key_arn == null ? 1 : 0
+
+  name          = "alias/nullplatform-valkey-${var.cache_name}"
+  target_key_id = aws_kms_key.cache[0].key_id
+}
+
 resource "aws_elasticache_user_group" "cache" {
   engine        = "valkey"
   user_group_id = "${var.cache_name}-ug"
@@ -52,6 +68,7 @@ resource "aws_elasticache_serverless_cache" "cache" {
   description          = "${var.cache_name} Valkey serverless cache"
   major_engine_version = "8"
   user_group_id        = aws_elasticache_user_group.cache.user_group_id
+  kms_key_id           = var.kms_key_arn != null ? var.kms_key_arn : aws_kms_key.cache[0].arn
   security_group_ids   = [aws_security_group.cache.id]
   subnet_ids           = local.subnet_ids
 
