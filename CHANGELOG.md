@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/nullplatform/services-valkey/compare/v0.2.2...v0.3.0) (2026-09-29)
+
+
+### Features
+
+* encrypt each cache with its own KMS key, overridable per account ([#24](https://github.com/nullplatform/services-valkey/issues/24)) ([aae598f](https://github.com/nullplatform/services-valkey/commit/aae598f06acc0c3ffa45eb01d0c96b1ec250bfc5))
+
 ## [0.2.2](https://github.com/nullplatform/services-valkey/compare/v0.2.1...v0.2.2) (2026-09-23)
 
 
