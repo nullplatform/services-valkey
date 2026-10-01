@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/nullplatform/services-valkey/compare/v0.3.0...v0.3.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **deps:** bump nullplatform/scopes/worker-bridge from 1.1.1 to 2.0.1 ([b531fe9](https://github.com/nullplatform/services-valkey/commit/b531fe9936fefb0d31321f5d70ff7377a37f16ff))
+* **deps:** bump nullplatform/scopes/worker-bridge from 1.1.1 to 2.0.1 ([ee5cd27](https://github.com/nullplatform/services-valkey/commit/ee5cd271cfc9aa2bfe4c35ae2df47a00339b73f6))
+
 ## [0.3.0](https://github.com/nullplatform/services-valkey/compare/v0.2.2...v0.3.0) (2026-09-29)
 
 
