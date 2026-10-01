@@ -24,11 +24,11 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  type        = string
-  description = "Comma-separated subnet IDs the cache is placed in"
+  type        = list(string)
+  description = "Subnets the cache is placed in, from vpc.subnets of the vpc provider"
 
   validation {
-    condition     = length(compact([for s in split(",", var.subnet_ids) : trimspace(s)])) > 0
+    condition     = length(var.subnet_ids) > 0
     error_message = "subnet_ids must contain at least one subnet ID"
   }
 }

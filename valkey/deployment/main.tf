@@ -3,8 +3,6 @@ locals {
     "managed-by" = "nullplatform"
     "service-id" = var.service_id
   })
-
-  subnet_ids = compact([for s in split(",", var.subnet_ids) : trimspace(s)])
 }
 
 data "aws_vpc" "cache" {
@@ -70,7 +68,7 @@ resource "aws_elasticache_serverless_cache" "cache" {
   user_group_id        = aws_elasticache_user_group.cache.user_group_id
   kms_key_id           = var.kms_key_arn != null ? var.kms_key_arn : aws_kms_key.cache[0].arn
   security_group_ids   = [aws_security_group.cache.id]
-  subnet_ids           = local.subnet_ids
+  subnet_ids           = var.subnet_ids
 
   tags = local.common_tags
 }
