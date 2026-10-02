@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+WORKFLOW_NAME="metric"
+if [ "$NOTIFICATION_ACTION" = "metric:list" ]; then
+  WORKFLOW_NAME="metric-list"
+fi
+
+WORKFLOW_PATH="$SERVICE_PATH/workflows/aws/$WORKFLOW_NAME.yaml"
+OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/workflows/aws/$WORKFLOW_NAME.yaml"
+VALUES_PATH="$SERVICE_PATH/values.yaml"
+
+CMD=(np service workflow exec --no-output --workflow "$WORKFLOW_PATH")
+
+if [[ -f "$VALUES_PATH" ]]; then
+  CMD+=(--values "$VALUES_PATH")
+fi
+
+if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
+  CMD+=(--overrides "$OVERRIDES_WORKFLOW_PATH")
+fi
+
+"${CMD[@]}"

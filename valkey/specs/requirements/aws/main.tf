@@ -60,6 +60,12 @@ resource "aws_iam_policy" "nullplatform_valkey" {
         Resource = "*"
       },
       {
+        Sid      = "ReadCacheMetrics"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:GetMetricStatistics"]
+        Resource = "*"
+      },
+      {
         Sid      = "CreateServiceLinkedRole"
         Effect   = "Allow"
         Action   = ["iam:CreateServiceLinkedRole"]
