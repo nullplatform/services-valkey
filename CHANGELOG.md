@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/nullplatform/services-valkey/compare/v0.3.3...v0.3.4) (2026-10-02)
+
+
+### Bug Fixes
+
+* scope the vpc endpoint grant to elasticache serverless by service name ([#33](https://github.com/nullplatform/services-valkey/issues/33)) ([8b4b8c9](https://github.com/nullplatform/services-valkey/commit/8b4b8c9e21ea424b9c15b0166b369ef1bedc743c))
+
 ## [0.3.3](https://github.com/nullplatform/services-valkey/compare/v0.3.2...v0.3.3) (2026-10-02)
 
 
