@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/nullplatform/services-valkey/compare/v0.3.2...v0.3.3) (2026-10-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency opentofu/opentofu to v1.13.1 ([#29](https://github.com/nullplatform/services-valkey/issues/29)) ([9642bf0](https://github.com/nullplatform/services-valkey/commit/9642bf0d168db4aa5cfcebf3be696f02a7ef2281))
+
 ## [0.3.2](https://github.com/nullplatform/services-valkey/compare/v0.3.1...v0.3.2) (2026-10-02)
 
 
