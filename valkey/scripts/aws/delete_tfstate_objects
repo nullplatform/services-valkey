@@ -16,7 +16,12 @@ if [ -z "${TFSTATE_KEY_PREFIX:-}" ]; then
   exit 1
 fi
 
-PREFIX="$TFSTATE_KEY_PREFIX"
+PREFIX="${TFSTATE_LINK_PREFIX-$TFSTATE_KEY_PREFIX}"
+
+if [ -z "$PREFIX" ]; then
+  echo "ERROR: TFSTATE_LINK_PREFIX is set to an empty value, which would match every object in ${TFSTATE_BUCKET}." >&2
+  exit 1
+fi
 
 delete_objects() {
   local query="$1"

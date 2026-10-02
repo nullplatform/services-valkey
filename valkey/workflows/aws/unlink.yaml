@@ -35,6 +35,8 @@ steps:
     output:
       - name: OUTPUT_DIR
         type: environment
+      - name: TFSTATE_LINK_PREFIX
+        type: environment
       - name: TOFU_MODULE_DIR
         type: environment
       - name: TOFU_INIT_VARIABLES
@@ -47,3 +49,7 @@ steps:
     file: $SERVICE_PATH/scripts/aws/do_tofu
     configuration:
       TOFU_ACTION: destroy
+
+  - name: cleanup link tfstate
+    type: script
+    file: $SERVICE_PATH/scripts/aws/delete_tfstate_objects
