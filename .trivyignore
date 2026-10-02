@@ -1,5 +1,2 @@
-# s3:* on np-service-* state buckets; enumerate bucket and object actions before this expires
-AVD-AWS-0345 exp:2026-10-31
-
 # worker-bridge base runs as root; the agent worker pod securityContext sets the runtime user
 AVD-DS-0002
