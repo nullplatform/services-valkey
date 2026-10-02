@@ -42,3 +42,19 @@ run_entrypoint() {
 	assert_contains "$(cat "$MOCK_LOG")" "--workflow $SERVICE_PATH/workflows/aws/metric-list.yaml"
 	assert_not_contains "$(cat "$MOCK_LOG")" "service-action exec"
 }
+
+@test "runs the log workflow without output for log notifications" {
+	export NOTIFICATION_ACTION="log:read"
+	run bash "$SERVICE_PATH/entrypoint/log"
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "np service workflow exec --no-output --workflow $SERVICE_PATH/workflows/aws/log.yaml"
+}
+
+@test "routes log notifications away from the service action runner" {
+	export NP_ACTION_CONTEXT
+	NP_ACTION_CONTEXT=$(jq -nc '{notification: {action: "log:read", arguments: {}}}')
+	run bash "$SERVICE_PATH/entrypoint/entrypoint" --service-path="$SERVICE_PATH"
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "--workflow $SERVICE_PATH/workflows/aws/log.yaml"
+	assert_not_contains "$(cat "$MOCK_LOG")" "service-action exec"
+}

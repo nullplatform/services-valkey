@@ -71,4 +71,8 @@ if [[ "$NOTIFICATION_ACTION" =~ ^metric: ]]; then
   exec "$WORKING_DIRECTORY/metric"
 fi
 
+if [[ "$NOTIFICATION_ACTION" =~ ^log: ]]; then
+  exec "$WORKING_DIRECTORY/log"
+fi
+
 np service-action exec --live-output --live-report --script="$WORKING_DIRECTORY/$ACTION_SOURCE"

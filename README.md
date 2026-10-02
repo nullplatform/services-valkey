@@ -106,6 +106,8 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 
 A service whose cache does not exist yet returns an empty series. A CloudWatch error fails the request instead of showing an empty graph.
 
+The service has no logs: `log:*` notifications run `workflows/aws/log.yaml`, which answers with no entries. Telemetry workflows run with `--no-output` and print nothing but their result, since stdout is the response.
+
 ## Connecting
 
 Serverless caches always run with encryption in transit, so every client must connect over TLS.

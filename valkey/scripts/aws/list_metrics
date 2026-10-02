@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-jq -n '{
+RESULT=$(jq -n -c '{
   results: [
     {name: "ElastiCacheProcessingUnits", title: "Processing units (ECPUs)", unit: "count"},
     {name: "BytesUsedForCache", title: "Memory used", unit: "bytes"},
@@ -10,4 +10,6 @@ jq -n '{
     {name: "SuccessfulReadRequestLatency", title: "Read latency", unit: "microseconds"},
     {name: "ThrottledCmds", title: "Throttled commands", unit: "count"}
   ] | map(. + {available_filters: [], available_group_by: []})
-}'
+}')
+
+echo "$RESULT"

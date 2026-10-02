@@ -10,6 +10,8 @@ setup() {
 	run_script list_metrics
 	[ "$status" -eq 0 ]
 	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[].name]')" '["ElastiCacheProcessingUnits","BytesUsedForCache","CacheHitRate","CurrConnections","SuccessfulReadRequestLatency","ThrottledCmds"]'
+	assert_equal "$captured_stderr" ""
+	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
 	assert_equal "$(echo "$captured_stdout" | jq '[.results[] | select(.unit and .title and (.available_filters | type == "array") and (.available_group_by | type == "array"))] | length')" "6"
 }
 

@@ -28,6 +28,15 @@ setup() {
 	assert_equal "$captured_stdout" '{"metric":"CacheHitRate","type":"gauge","period_in_seconds":300,"unit":"percent","results":[{"selector":{"cache_name":"np-my-cache-0f3a6"},"data":[{"timestamp":"2026-10-02T10:00:00+00:00","value":88},{"timestamp":"2026-10-02T10:05:00+00:00","value":91.5}]}]}'
 }
 
+@test "prints only the result and logs nothing when the query succeeds" {
+	export MOCK_CW_RESPONSE='{"Label":"CacheHitRate","Datapoints":[{"Timestamp":"2026-10-02T10:00:00+00:00","Average":88}]}'
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
+	echo "$captured_stdout" | jq -e '.results[0].data[0].value == 88'
+	assert_equal "$captured_stderr" ""
+}
+
 @test "uses the statistic and unit that belong to each metric" {
 	for pair in "ElastiCacheProcessingUnits:Sum:count" "BytesUsedForCache:Maximum:bytes" "CurrConnections:Maximum:count" "SuccessfulReadRequestLatency:Average:microseconds" "ThrottledCmds:Sum:count"; do
 		IFS=: read -r metric statistic unit <<<"$pair"
@@ -80,6 +89,7 @@ setup() {
 	run_script fetch_metric
 	[ "$status" -eq 0 ]
 	assert_equal "$captured_stdout" '{"metric":"CacheHitRate","type":"gauge","period_in_seconds":300,"unit":"percent","results":[]}'
+	assert_equal "$captured_stderr" ""
 	assert_not_contains "$(cat "$MOCK_LOG")" "cloudwatch"
 }
 
