@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/nullplatform/services-valkey/compare/v0.3.1...v0.3.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* take region and network from the cloud and vpc providers ([#28](https://github.com/nullplatform/services-valkey/issues/28)) ([7a159f1](https://github.com/nullplatform/services-valkey/commit/7a159f1d2b070276eda86387eeefd48d10ac7593))
+
 ## [0.3.1](https://github.com/nullplatform/services-valkey/compare/v0.3.0...v0.3.1) (2026-10-01)
 
 
