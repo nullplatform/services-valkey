@@ -1,0 +1,129 @@
+#!/bin/bash
+set -euo pipefail
+
+if ! type -t service_attributes >/dev/null 2>&1; then
+  service_attributes() {
+    local service_id="$1"
+    np service read --id "$service_id" --format json | jq -c '.attributes // {}'
+  }
+fi
+
+metric_config() {
+  case "$1" in
+  ElastiCacheProcessingUnits) echo "count Sum" ;;
+  BytesUsedForCache) echo "bytes Maximum" ;;
+  CacheHitRate) echo "percent Average" ;;
+  CurrConnections) echo "count Maximum" ;;
+  SuccessfulReadRequestLatency) echo "microseconds Average" ;;
+  ThrottledCmds) echo "count Sum" ;;
+  *) return 1 ;;
+  esac
+}
+
+iso_seconds_ago() {
+  local seconds="$1" epoch
+  epoch=$(($(date -u +%s) - seconds))
+  date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ
+}
+
+require_timestamp() {
+  local name="$1" value="$2"
+  if [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})$ ]]; then
+    echo "ERROR: ${name} '${value}' is not an ISO 8601 timestamp." >&2
+    exit 1
+  fi
+}
+
+cloudwatch_period() {
+  local requested="$1"
+  if [[ ! "$requested" =~ ^[0-9]+$ ]] || [ "$requested" -lt 60 ]; then
+    echo 60
+    return 0
+  fi
+  echo $(((requested + 59) / 60 * 60))
+}
+
+empty_series() {
+  jq -n -c --arg metric "$1" --arg unit "$2" --argjson period "$3" \
+    '{metric: $metric, type: "gauge", period_in_seconds: $period, unit: $unit, results: []}'
+}
+
+ARGUMENTS=$(echo "$CONTEXT" | jq -c '.arguments // {}')
+METRIC=$(echo "$ARGUMENTS" | jq -r '.metric // ""')
+START_TIME=$(echo "$ARGUMENTS" | jq -r '.start_time // ""')
+END_TIME=$(echo "$ARGUMENTS" | jq -r '.end_time // ""')
+PERIOD=$(cloudwatch_period "$(echo "$ARGUMENTS" | jq -r '.period // ""')")
+
+if ! CONFIG=$(metric_config "$METRIC"); then
+  echo "ERROR: unknown metric '${METRIC}'." >&2
+  exit 1
+fi
+UNIT="${CONFIG% *}"
+STATISTIC="${CONFIG#* }"
+
+if [ -z "$START_TIME" ] || [ -z "$END_TIME" ]; then
+  START_TIME=$(iso_seconds_ago 3600)
+  END_TIME=$(iso_seconds_ago 0)
+fi
+require_timestamp start_time "$START_TIME"
+require_timestamp end_time "$END_TIME"
+
+SERVICE_ATTRS=$(echo "$ARGUMENTS" | jq -c '.service.attributes // {}')
+if [ "$(echo "$SERVICE_ATTRS" | jq -r '.cache_name // ""')" = "" ]; then
+  SERVICE_ID=$(echo "$ARGUMENTS" | jq -r '.service.id // .service_id // ""')
+  if [ -z "$SERVICE_ID" ]; then
+    echo "ERROR: the metric request carries no service id." >&2
+    exit 1
+  fi
+  SERVICE_ATTRS=$(service_attributes "$SERVICE_ID")
+fi
+
+CACHE_NAME=$(echo "$SERVICE_ATTRS" | jq -r '.cache_name // ""')
+REGION=$(echo "$SERVICE_ATTRS" | jq -r '.valkey_arn // "" | split(":") | .[3] // ""')
+
+if [ -z "$CACHE_NAME" ] || [ -z "$REGION" ]; then
+  echo "The cache has not been created yet; returning an empty series." >&2
+  empty_series "$METRIC" "$UNIT" "$PERIOD"
+  exit 0
+fi
+
+if [[ ! "$REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+  echo "ERROR: '${REGION}' from the cache ARN is not an AWS region." >&2
+  exit 1
+fi
+
+AWS_PROFILE_VAL=$(grep "^aws_profile:" "${VALUES:-/dev/null}" 2>/dev/null | sed 's/^[^:]*: *//;s/^"//;s/"$//' | head -1 || true)
+if [ -n "$AWS_PROFILE_VAL" ]; then
+  export AWS_PROFILE="$AWS_PROFILE_VAL"
+fi
+
+if ! RESPONSE=$(aws cloudwatch get-metric-statistics \
+  --region "$REGION" \
+  --namespace AWS/ElastiCache \
+  --metric-name "$METRIC" \
+  --dimensions "Name=clusterId,Value=${CACHE_NAME}" \
+  --start-time "$START_TIME" \
+  --end-time "$END_TIME" \
+  --period "$PERIOD" \
+  --statistics "$STATISTIC" \
+  --output json); then
+  echo "ERROR: CloudWatch rejected the ${METRIC} query for ${CACHE_NAME} in ${REGION}." >&2
+  exit 1
+fi
+
+echo "$RESPONSE" | jq -c \
+  --arg metric "$METRIC" \
+  --arg unit "$UNIT" \
+  --arg statistic "$STATISTIC" \
+  --arg cache_name "$CACHE_NAME" \
+  --argjson period "$PERIOD" \
+  '{
+    metric: $metric,
+    type: "gauge",
+    period_in_seconds: $period,
+    unit: $unit,
+    results: [{
+      selector: {cache_name: $cache_name},
+      data: ([(.Datapoints // [])[] | {timestamp: .Timestamp, value: .[$statistic]}] | sort_by(.timestamp))
+    }]
+  }'

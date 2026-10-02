@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+
+jq -n '{
+  results: [
+    {name: "ElastiCacheProcessingUnits", title: "Processing units (ECPUs)", unit: "count"},
+    {name: "BytesUsedForCache", title: "Memory used", unit: "bytes"},
+    {name: "CacheHitRate", title: "Cache hit rate", unit: "percent"},
+    {name: "CurrConnections", title: "Connections", unit: "count"},
+    {name: "SuccessfulReadRequestLatency", title: "Read latency", unit: "microseconds"},
+    {name: "ThrottledCmds", title: "Throttled commands", unit: "count"}
+  ] | map(. + {available_filters: [], available_group_by: []})
+}'

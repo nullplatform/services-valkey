@@ -9,7 +9,7 @@ setup() {
 @test "skips assuming a role when no role arn was resolved" {
 	run_script assume_role
 	[ "$status" -eq 0 ]
-	assert_contains "$captured_stdout" "assume_role=skipped"
+	assert_contains "$captured_stderr" "assume_role=skipped"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
 	assert_not_contains "$(cat "$MOCK_LOG")" "aws sts"
 }
@@ -19,7 +19,7 @@ setup() {
 	export SERVICE_ID="abc123"
 	run_script assume_role
 	[ "$status" -eq 0 ]
-	assert_contains "$captured_stdout" "Role assumed successfully"
+	assert_contains "$captured_stderr" "Role assumed successfully"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "ASSUMEDKEY"
 	assert_equal "$(captured AWS_SECRET_ACCESS_KEY)" "assumedsecret"
 	assert_equal "$(captured AWS_SESSION_TOKEN)" "assumedtoken"
