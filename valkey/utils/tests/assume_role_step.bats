@@ -33,15 +33,15 @@ iam_provider_attributes() {
 	assert_contains "$(cat "$MOCK_LOG")" "--nrn organization=1:account=2:scope=9"
 }
 
-@test "falls back to context.entity_nrn when service and scope nrn are absent" {
-	export CONTEXT='{"entity_nrn":"organization=1:account=2:entity=5"}'
+@test "prefers context.entity_nrn over the service and scope nrn" {
+	export CONTEXT='{"entity_nrn":"organization=1:account=2:entity=5","service":{"nrn":"organization=1:account=2:namespace=3"},"scope":{"nrn":"organization=1:account=2:scope=9"}}'
 	run_script assume_role_step
 	[ "$status" -eq 0 ]
 	assert_contains "$(cat "$MOCK_LOG")" "--nrn organization=1:account=2:entity=5"
 }
 
-@test "passes the context dimensions as a comma separated key:value list" {
-	export CONTEXT='{"service":{"nrn":"organization=1:account=2"},"dimensions":{"region":"us-west-2"}}'
+@test "passes the service dimensions as a comma separated key:value list" {
+	export CONTEXT='{"service":{"nrn":"organization=1:account=2","dimensions":{"region":"us-west-2"}}}'
 	run_script assume_role_step
 	[ "$status" -eq 0 ]
 	assert_contains "$(cat "$MOCK_LOG")" "--dimensions region:us-west-2"

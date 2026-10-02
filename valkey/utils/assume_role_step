@@ -3,11 +3,11 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/assume_role_lib"
 
-NRN=$(echo "${CONTEXT:-}" | jq -r '.service.nrn // .scope.nrn // .entity_nrn // ""' 2>/dev/null)
+NRN=$(echo "${CONTEXT:-}" | jq -r '.entity_nrn // .service.nrn // .scope.nrn // ""' 2>/dev/null)
 
 DIMENSIONS=$(echo "${CONTEXT:-}" | jq -r '
-  if (.dimensions | type) == "object" and ((.dimensions | length) > 0)
-  then [ .dimensions | to_entries[] | "\(.key):\(.value)" ] | join(",")
+  if (.service.dimensions | type) == "object" and ((.service.dimensions | length) > 0)
+  then [ .service.dimensions | to_entries[] | "\(.key):\(.value)" ] | join(",")
   else empty end' 2>/dev/null)
 
 VALKEY_ASSUME_ROLE_SELECTOR="${VALKEY_ASSUME_ROLE_SELECTOR:-valkey}"

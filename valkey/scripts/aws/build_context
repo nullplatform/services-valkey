@@ -20,49 +20,60 @@ resource_name() {
   echo "np-${short:+${short}-}${id:0:5}${suffix}"
 }
 
-resolve_setting() {
-  local key="$1"
-  local value
-  value=$(echo "$SERVICE_ATTRS" | jq -r --arg key "$key" '.[$key] // ""')
-  if [ -z "$value" ]; then
-    value=$(yaml_value "$key" "" "$VALUES")
+if ! type -t provider_attributes >/dev/null 2>&1; then
+  provider_attributes() {
+    local category="$1" nrn="$2" dimensions="$3"
+    np provider list \
+      --nrn "$nrn" \
+      --categories "$category" \
+      ${dimensions:+--dimensions "$dimensions"} \
+      --format json \
+      | jq -c '(.results // [])[0].attributes // {}'
+  }
+fi
+
+keep_network_from_state() {
+  local state_file="$1" state_vpc_id state_subnet_ids state_region
+
+  state_vpc_id=$(jq -r '[.resources[]? | select(.mode == "managed" and .type == "aws_security_group" and .name == "cache")][0].instances[0].attributes.vpc_id // ""' "$state_file")
+  state_subnet_ids=$(jq -c '[.resources[]? | select(.mode == "managed" and .type == "aws_elasticache_serverless_cache" and .name == "cache")][0].instances[0].attributes.subnet_ids // [] | sort' "$state_file")
+  state_region=$(jq -r '[.resources[]? | select(.mode == "managed" and .type == "aws_elasticache_serverless_cache" and .name == "cache")][0].instances[0].attributes.arn // "" | split(":") | .[3] // ""' "$state_file")
+
+  if [ -n "$state_vpc_id" ] && [ "$state_vpc_id" != "$VPC_ID" ]; then
+    echo "WARNING: the vpc provider resolves ${VPC_ID}, but this cache lives in ${state_vpc_id}; keeping ${state_vpc_id} so the cache is not replaced." >&2
+    VPC_ID="$state_vpc_id"
   fi
-  echo "$value"
+
+  if [ "$state_subnet_ids" != "[]" ] && [ "$state_subnet_ids" != "$(echo "$SUBNET_IDS" | jq -c 'sort')" ]; then
+    echo "WARNING: the vpc provider resolves subnets ${SUBNET_IDS}, but this cache uses ${state_subnet_ids}; keeping them so the cache is not replaced." >&2
+    SUBNET_IDS="$state_subnet_ids"
+  fi
+
+  if [ -n "$state_region" ] && [ "$state_region" != "$REGION" ]; then
+    echo "WARNING: the cloud-providers provider resolves ${REGION}, but this cache lives in ${state_region}; keeping ${state_region}." >&2
+    REGION="$state_region"
+  fi
 }
 
-resolve_region() {
-  local from_attrs="$1" account_nrn="$2"
-  if [ -n "$from_attrs" ]; then
-    echo "$from_attrs"
-    return 0
+require_network_ids() {
+  local source="$1" subnet_id
+
+  if [[ ! "$REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+    echo "ERROR: ${source} gives '${REGION}', which is not an AWS region." >&2
+    exit 1
   fi
 
-  if [ -z "$account_nrn" ]; then
-    echo "ERROR: could not derive account NRN from .service.nrn in context" >&2
-    return 1
+  if [[ ! "$VPC_ID" =~ ^vpc-[0-9a-f]+$ ]]; then
+    echo "ERROR: ${source} gives '${VPC_ID}', which is not a VPC ID." >&2
+    exit 1
   fi
 
-  echo "Resolving region for account: ${account_nrn}" >&2
-
-  local providers provider_id provider_data region
-  providers=$(np provider list --nrn "$account_nrn" --format json --limit 100)
-  provider_id=$(echo "$providers" \
-    | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["account.region"]))] | first | .id // ""')
-
-  if [ -z "$provider_id" ] || [ "$provider_id" = "null" ]; then
-    echo "ERROR: no account provider with account.region found for ${account_nrn}" >&2
-    return 1
-  fi
-
-  provider_data=$(np provider read --id "$provider_id" --format json)
-  region=$(echo "$provider_data" | jq -r '.attributes.account.region // ""')
-
-  if [ -z "$region" ]; then
-    echo "ERROR: account.region not found in provider ${provider_id}" >&2
-    return 1
-  fi
-
-  echo "$region"
+  for subnet_id in $(echo "$SUBNET_IDS" | jq -r '.[]'); do
+    if [[ ! "$subnet_id" =~ ^subnet-[0-9a-f]+$ ]]; then
+      echo "ERROR: ${source} gives '${subnet_id}', which is not a subnet ID." >&2
+      exit 1
+    fi
+  done
 }
 
 resolve_cache_name() {
@@ -138,7 +149,6 @@ require_state_bucket() {
 
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
 SERVICE_LABEL=$(echo "$CONTEXT" | jq -r '.service.slug // .service.name // ""')
-SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '(.service.attributes // {}) * (.parameters // {})')
 
 CACHE_NAME=$(resolve_cache_name)
 export SERVICE_ID CACHE_NAME
@@ -148,23 +158,41 @@ if [ -n "$AWS_PROFILE_VAL" ]; then
   export AWS_PROFILE="$AWS_PROFILE_VAL"
 fi
 
-ACCOUNT_NRN=$(echo "$CONTEXT" | jq -r '.service.nrn // .entity_nrn // ""' | sed 's/:namespace=.*$//')
-REGION=$(resolve_region "$(echo "$SERVICE_ATTRS" | jq -r '.aws_region // ""')" "$ACCOUNT_NRN")
-echo "Using region: ${REGION}"
-export REGION
+ENTITY_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // .service.nrn // ""')
+if [ -z "$ENTITY_NRN" ]; then
+  echo "ERROR: could not read the service NRN from .entity_nrn or .service.nrn in context" >&2
+  exit 1
+fi
 
-VPC_ID=$(resolve_setting vpc_id)
+DIMENSIONS=$(echo "$CONTEXT" | jq -r '
+  if (.service.dimensions | type) == "object" and ((.service.dimensions | length) > 0)
+  then [ .service.dimensions | to_entries[] | "\(.key):\(.value)" ] | join(",")
+  else empty end')
+LOOKUP_TARGET="${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
+
+echo "Resolving region and VPC for ${LOOKUP_TARGET}"
+
+REGION=$(provider_attributes "cloud-providers" "$ENTITY_NRN" "$DIMENSIONS" | jq -r '.account.region // ""')
+if [ -z "$REGION" ]; then
+  echo "ERROR: no cloud-providers provider with account.region found for ${LOOKUP_TARGET}" >&2
+  exit 1
+fi
+
+VPC_ATTRIBUTES=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS")
+VPC_ID=$(echo "$VPC_ATTRIBUTES" | jq -r '.vpc.id // ""')
+SUBNET_IDS=$(echo "$VPC_ATTRIBUTES" | jq -c '[(.vpc.subnets // [])[] | select(type == "string" and . != "")]')
+
 if [ -z "$VPC_ID" ]; then
-  echo "ERROR: vpc_id is required (set it in the account configuration or in values.yaml)" >&2
+  echo "ERROR: no vpc provider with vpc.id found for ${LOOKUP_TARGET}" >&2
   exit 1
 fi
 
-SUBNET_IDS=$(resolve_setting subnet_ids | tr -d '[:space:]')
-if [ -z "$SUBNET_IDS" ]; then
-  echo "ERROR: subnet_ids is required (set it in the account configuration or in values.yaml)" >&2
+if [ "$SUBNET_IDS" = "[]" ]; then
+  echo "ERROR: the vpc provider for ${LOOKUP_TARGET} has no vpc.subnets; list the private subnets the cache should use" >&2
   exit 1
 fi
-export VPC_ID SUBNET_IDS
+
+require_network_ids "the ${LOOKUP_TARGET} providers"
 
 require_state_bucket "$REGION"
 TFSTATE_BUCKET="$VALKEY_S3_STATE_BUCKET"
@@ -175,15 +203,6 @@ echo "Using state prefix: ${TFSTATE_KEY_PREFIX}"
 export OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 mkdir -p "$OUTPUT_DIR"
 
-export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
-
-export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
-
-TFVARS_FILE="$OUTPUT_DIR/terraform.tfvars.json"
-echo "$CONTEXT" | jq '{tags: ((.tags // {}) | with_entries(select(.value | type == "string")))}' > "$TFVARS_FILE"
-
-TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var=subnet_ids=${SUBNET_IDS} -var-file=${TFVARS_FILE}"
-
 STATE_STATUS=0
 STATE_KMS_KEY=$(kms_key_from_state "$TFSTATE_BUCKET" "${TFSTATE_KEY_PREFIX}terraform.tfstate" "$REGION" "$OUTPUT_DIR/previous-state.json") || STATE_STATUS=$?
 
@@ -191,6 +210,28 @@ if [ "$STATE_STATUS" -eq 1 ]; then
   echo "ERROR: could not read the tofu state at s3://${TFSTATE_BUCKET}/${TFSTATE_KEY_PREFIX}terraform.tfstate to find the cache's KMS key." >&2
   exit 1
 fi
+
+if [ "$STATE_STATUS" -eq 0 ]; then
+  keep_network_from_state "$OUTPUT_DIR/previous-state.json"
+  require_network_ids "the tofu state"
+fi
+
+echo "Using region: ${REGION}"
+echo "Using VPC: ${VPC_ID}"
+echo "Using subnets: ${SUBNET_IDS}"
+export REGION VPC_ID SUBNET_IDS
+
+export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
+
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
+
+TFVARS_FILE="$OUTPUT_DIR/terraform.tfvars.json"
+echo "$CONTEXT" | jq --argjson subnet_ids "$SUBNET_IDS" '{
+  subnet_ids: $subnet_ids,
+  tags: ((.tags // {}) | with_entries(select(.value | type == "string")))
+}' > "$TFVARS_FILE"
+
+TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var-file=${TFVARS_FILE}"
 
 KMS_KEY_ARN=$(resolve_kms_key_arn "$(echo "$CONTEXT" | jq -r '.type // ""')" "$STATE_KMS_KEY")
 

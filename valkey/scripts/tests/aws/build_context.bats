@@ -35,58 +35,153 @@ setup() {
 	assert_equal "$(captured CACHE_NAME)" "np-0f3a6"
 }
 
-@test "takes the region from the aws_region attribute without querying the account provider" {
+@test "resolves the region and the network from the providers of the service nrn" {
 	run_script build_context
 	[ "$status" -eq 0 ]
 	assert_equal "$(captured REGION)" "us-west-2"
-	assert_not_contains "$(cat "$MOCK_LOG")" "np provider"
-}
-
-@test "resolves the region from the account provider when the attribute is absent" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.parameters.aws_region)')
-	export MOCK_NP_PROVIDERS='{"results":[{"id":"prov-1","data_source":{"stored_keys":["account.region"]}}]}'
-	export MOCK_NP_PROVIDER='{"attributes":{"account":{"region":"eu-central-1"}}}'
-	run_script build_context
-	[ "$status" -eq 0 ]
-	assert_equal "$(captured REGION)" "eu-central-1"
-	assert_contains "$(cat "$MOCK_LOG")" "np provider list --nrn organization=1:account=2 --format json --limit 100"
-	assert_contains "$(cat "$MOCK_LOG")" "np provider read --id prov-1 --format json"
-}
-
-@test "fails with a clear message when no region can be resolved" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.parameters.aws_region)')
-	run_script build_context
-	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "ERROR: no account provider with account.region found for organization=1:account=2"
-}
-
-@test "prefers parameters over stored attributes for the network settings" {
-	CONTEXT=$(service_context '{"vpc_id":"vpc-old","subnet_ids":"subnet-old","aws_region":"us-east-1"}' "$(full_params)")
-	run_script build_context
-	[ "$status" -eq 0 ]
 	assert_equal "$(captured VPC_ID)" "vpc-0123"
-	assert_equal "$(captured SUBNET_IDS)" "subnet-a,subnet-b"
+	assert_equal "$(captured SUBNET_IDS)" '["subnet-a","subnet-b"]'
+	assert_contains "$(cat "$MOCK_LOG")" "np provider list --nrn organization=1:account=2:namespace=3:application=4 --categories cloud-providers --format json"
+	assert_contains "$(cat "$MOCK_LOG")" "np provider list --nrn organization=1:account=2:namespace=3:application=4 --categories vpc --format json"
 }
 
-@test "falls back to values.yaml for the network settings when the context has none" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.parameters.vpc_id, .parameters.subnet_ids)')
+@test "looks the providers up by the entity nrn when the context has one" {
+	CONTEXT=$(echo "$CONTEXT" | jq '.entity_nrn = "organization=1:account=2:namespace=9"')
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "--nrn organization=1:account=2:namespace=9 --categories vpc"
+	assert_not_contains "$(cat "$MOCK_LOG")" "application=4"
+}
+
+@test "passes the service dimensions to every provider lookup" {
+	CONTEXT=$(echo "$CONTEXT" | jq '.service.dimensions = {environment: "prod", country: "ar"}')
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "--categories cloud-providers --dimensions environment:prod,country:ar"
+	assert_contains "$(cat "$MOCK_LOG")" "--categories vpc --dimensions environment:prod,country:ar"
+}
+
+@test "omits the dimensions flag when the service has no dimensions" {
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_not_contains "$(cat "$MOCK_LOG")" "--dimensions"
+}
+
+@test "ignores the legacy network attributes and values.yaml settings" {
+	CONTEXT=$(service_context '{"aws_region":"us-east-1","vpc_id":"vpc-0dd","subnet_ids":"subnet-old"}' "$(full_params)")
 	printf 'aws_profile: ""\nvpc_id: "vpc-from-values"\nsubnet_ids: "subnet-v1,subnet-v2"\n' > "$VALUES"
 	run_script build_context
 	[ "$status" -eq 0 ]
-	assert_equal "$(captured VPC_ID)" "vpc-from-values"
-	assert_equal "$(captured SUBNET_IDS)" "subnet-v1,subnet-v2"
+	assert_equal "$(captured REGION)" "us-west-2"
+	assert_equal "$(captured VPC_ID)" "vpc-0123"
+	assert_equal "$(captured SUBNET_IDS)" '["subnet-a","subnet-b"]'
 }
 
-@test "fails when neither the context nor values.yaml provide the vpc or the subnets" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.parameters.vpc_id)')
+@test "fails when the context carries no nrn" {
+	CONTEXT=$(echo "$CONTEXT" | jq 'del(.service.nrn)')
 	run_script build_context
 	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "ERROR: vpc_id is required"
+	assert_contains "$captured_stderr" "ERROR: could not read the service NRN"
+}
 
-	CONTEXT=$(service_context '{}' "$(full_params | jq 'del(.subnet_ids)')")
+@test "fails with a clear message when no cloud-providers provider has a region" {
+	export MOCK_NP_CLOUD_PROVIDERS='{"results":[]}'
 	run_script build_context
 	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "ERROR: subnet_ids is required"
+	assert_contains "$captured_stderr" "ERROR: no cloud-providers provider with account.region found for organization=1:account=2:namespace=3:application=4"
+}
+
+@test "fails with a clear message when no vpc provider has a vpc id" {
+	export MOCK_NP_VPC_PROVIDERS='{"results":[]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: no vpc provider with vpc.id found for organization=1:account=2:namespace=3:application=4"
+}
+
+@test "fails when the vpc provider lists no subnets" {
+	export MOCK_NP_VPC_PROVIDERS='{"results":[{"attributes":{"vpc":{"id":"vpc-0123","subnets":[]}}}]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "has no vpc.subnets"
+
+	export MOCK_NP_VPC_PROVIDERS='{"results":[{"attributes":{"vpc":{"id":"vpc-0123"}}}]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "has no vpc.subnets"
+}
+
+@test "fails before running tofu when a provider value is not a well-formed aws id" {
+	export MOCK_NP_CLOUD_PROVIDERS='{"results":[{"attributes":{"account":{"region":"us-east-1 -backend-config=bucket=evil"}}}]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "which is not an AWS region"
+	assert_not_contains "$(cat "$MOCK_LOG")" "s3api head-bucket"
+
+	unset MOCK_NP_CLOUD_PROVIDERS
+	setup_mocks
+	export MOCK_NP_VPC_PROVIDERS='{"results":[{"attributes":{"vpc":{"id":"vpc-1 -var=kms_key_arn=x","subnets":["subnet-a"]}}}]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "which is not a VPC ID"
+
+	export MOCK_NP_VPC_PROVIDERS='{"results":[{"attributes":{"vpc":{"id":"vpc-0123","subnets":["subnet-a","not a subnet"]}}}]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "which is not a subnet ID"
+}
+
+@test "fails when the tofu state records a malformed vpc id" {
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_security_group","name":"cache","instances":[{"attributes":{"vpc_id":"vpc-1 -var=x=y"}}]}]}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "the tofu state gives"
+}
+
+@test "writes the provider subnets to the tfvars file as a list" {
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(jq -c '.subnet_ids' /tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json)" '["subnet-a","subnet-b"]'
+}
+
+@test "keeps the vpc, subnets and region of an existing cache when the providers resolve others" {
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_security_group","name":"cache","instances":[{"attributes":{"vpc_id":"vpc-0dd"}}]},{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"arn":"arn:aws:elasticache:us-east-1:222222222222:serverlesscache:np-my-cache-0f3a6","subnet_ids":["subnet-0ddb","subnet-0dda"]}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured VPC_ID)" "vpc-0dd"
+	assert_equal "$(captured SUBNET_IDS)" '["subnet-0dda","subnet-0ddb"]'
+	assert_equal "$(captured REGION)" "us-east-1"
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=region=us-east-1"
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=vpc_id=vpc-0dd"
+	assert_equal "$(jq -c '.subnet_ids' /tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json)" '["subnet-0dda","subnet-0ddb"]'
+	assert_contains "$captured_stderr" "keeping vpc-0dd so the cache is not replaced"
+}
+
+@test "keeps only the subnets of an existing cache when the vpc and region already match" {
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_security_group","name":"cache","instances":[{"attributes":{"vpc_id":"vpc-0123"}}]},{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"arn":"arn:aws:elasticache:us-west-2:222222222222:serverlesscache:np-my-cache-0f3a6","subnet_ids":["subnet-a","subnet-c"]}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured VPC_ID)" "vpc-0123"
+	assert_equal "$(captured REGION)" "us-west-2"
+	assert_equal "$(captured SUBNET_IDS)" '["subnet-a","subnet-c"]'
+	assert_contains "$captured_stderr" "keeping them so the cache is not replaced"
+	assert_not_contains "$captured_stderr" "keeping vpc-"
+}
+
+@test "keeps the providers network when the state has no cache resources" {
+	export MOCK_STATE_JSON='{"resources":[]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured VPC_ID)" "vpc-0123"
+	assert_equal "$(captured SUBNET_IDS)" '["subnet-a","subnet-b"]'
+	assert_not_contains "$captured_stderr" "WARNING"
+}
+
+@test "does not warn when the existing cache already matches the providers" {
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_security_group","name":"cache","instances":[{"attributes":{"vpc_id":"vpc-0123"}}]},{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"arn":"arn:aws:elasticache:us-west-2:222222222222:serverlesscache:np-my-cache-0f3a6","subnet_ids":["subnet-b","subnet-a"]}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured SUBNET_IDS)" '["subnet-a","subnet-b"]'
+	assert_not_contains "$captured_stderr" "WARNING"
 }
 
 @test "exports the tofu execution variables for the deployment module" {
@@ -97,7 +192,7 @@ setup() {
 	assert_equal "$(captured TFSTATE_BUCKET)" "np-valkey-state"
 	assert_equal "$(captured TFSTATE_KEY_PREFIX)" "services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/"
 	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-valkey-state -backend-config=key=services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
-	assert_equal "$(captured TOFU_VARIABLES)" "-var=service_id=0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -var=region=us-west-2 -var=cache_name=np-my-cache-0f3a6 -var=vpc_id=vpc-0123 -var=subnet_ids=subnet-a,subnet-b -var-file=/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json"
+	assert_equal "$(captured TOFU_VARIABLES)" "-var=service_id=0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -var=region=us-west-2 -var=cache_name=np-my-cache-0f3a6 -var=vpc_id=vpc-0123 -var-file=/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json"
 }
 
 @test "writes the context tags to the tfvars file keeping only string values" {
@@ -191,13 +286,6 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(captured CACHE_NAME)" "np-old-slug-0f3a6"
 	assert_contains "$captured_stderr" "Using existing cache_name from service attributes: np-old-slug-0f3a6"
-}
-
-@test "strips whitespace from the subnet list so it survives word splitting" {
-	CONTEXT=$(echo "$CONTEXT" | jq '.parameters.subnet_ids = " subnet-a, subnet-b "')
-	run_script build_context
-	[ "$status" -eq 0 ]
-	assert_equal "$(captured SUBNET_IDS)" "subnet-a,subnet-b"
 }
 
 @test "passes the configured kms key on create when there is no state yet" {

@@ -27,30 +27,6 @@
         "valkey_arn"
       ],
       "properties": {
-        "aws_region": {
-          "type": "string",
-          "title": "AWS Region",
-          "config": "aws.region",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "Region where the cache is created (taken from the account configuration)"
-        },
-        "vpc_id": {
-          "type": "string",
-          "title": "VPC",
-          "config": "aws.vpcId",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "VPC the cache is placed in (taken from the account configuration)"
-        },
-        "subnet_ids": {
-          "type": "string",
-          "title": "Subnets",
-          "config": "aws.subnetIds",
-          "visibleOn": [],
-          "editableOn": [],
-          "description": "Comma-separated subnet IDs the cache is placed in (taken from the account configuration)"
-        },
         "endpoint": {
           "type": "string",
           "title": "Endpoint",

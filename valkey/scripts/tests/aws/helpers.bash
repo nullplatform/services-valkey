@@ -13,8 +13,13 @@ setup_mocks() {
 	export MOCK_BUCKET_EXISTS="${MOCK_BUCKET_EXISTS:-0}"
 	export MOCK_TOFU_OUTPUTS="${MOCK_TOFU_OUTPUTS:-{\}}"
 	export MOCK_TOFU_EXIT="${MOCK_TOFU_EXIT:-0}"
-	export MOCK_NP_PROVIDERS="${MOCK_NP_PROVIDERS:-{\"results\":[]\}}"
-	export MOCK_NP_PROVIDER="${MOCK_NP_PROVIDER:-{\}}"
+	if [ -z "${MOCK_NP_CLOUD_PROVIDERS+set}" ]; then
+		MOCK_NP_CLOUD_PROVIDERS='{"results":[{"attributes":{"account":{"region":"us-west-2"}}}]}'
+	fi
+	if [ -z "${MOCK_NP_VPC_PROVIDERS+set}" ]; then
+		MOCK_NP_VPC_PROVIDERS='{"results":[{"attributes":{"vpc":{"id":"vpc-0123","subnets":["subnet-a","subnet-b"]}}}]}'
+	fi
+	export MOCK_NP_CLOUD_PROVIDERS MOCK_NP_VPC_PROVIDERS
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
 	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE
@@ -61,10 +66,23 @@ MOCK
 	cat > "$MOCK_BIN/np" <<'MOCK'
 #!/bin/bash
 echo "np $*" >> "$MOCK_LOG"
-case "$*" in
-	"provider list"*) echo "$MOCK_NP_PROVIDERS" ;;
-	"provider read"*) echo "$MOCK_NP_PROVIDER" ;;
-	*) echo "{}" ;;
+if [ "$1 $2" != "provider list" ]; then
+	echo "{}"
+	exit 0
+fi
+category=""
+prev=""
+for arg in "$@"; do
+	case "$prev" in
+	--categories) category="$arg" ;;
+	--limit) echo '{"error":"cannot use flag limit when using categories flag"}'; exit 1 ;;
+	esac
+	prev="$arg"
+done
+case "$category" in
+	cloud-providers) echo "$MOCK_NP_CLOUD_PROVIDERS" ;;
+	vpc) echo "$MOCK_NP_VPC_PROVIDERS" ;;
+	*) echo '{"results":[]}' ;;
 esac
 exit 0
 MOCK
@@ -120,9 +138,6 @@ link_context() {
 
 full_params() {
 	jq -n '{
-		aws_region: "us-west-2",
-		vpc_id: "vpc-0123",
-		subnet_ids: "subnet-a,subnet-b",
 		access_key_id: "AKIASTATIC",
 		secret_access_key: "static-secret"
 	}'
