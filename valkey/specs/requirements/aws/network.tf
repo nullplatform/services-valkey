@@ -55,7 +55,7 @@ resource "aws_iam_policy" "nullplatform_valkey_network" {
         Action   = ["ec2:CreateVpcEndpoint"]
         Resource = "arn:aws:ec2:*:${local.account_id}:vpc-endpoint/*"
         Condition = {
-          StringEquals = { "aws:RequestTag/AmazonElastiCacheManaged" = "true" }
+          StringLike = { "ec2:VpceServiceName" = "com.amazonaws.elasticache.serverless.*" }
         }
       },
       {
