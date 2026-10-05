@@ -51,3 +51,29 @@ setup() {
 	assert_contains "$captured_stderr" "incomplete credentials"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
 }
+
+@test "stays silent when quiet and no role arn was resolved" {
+	export ASSUME_ROLE_QUIET=true
+	run_script assume_role
+	[ "$status" -eq 0 ]
+	assert_equal "$captured_stdout" ""
+	assert_equal "$captured_stderr" ""
+}
+
+@test "stays silent when quiet and the role is assumed" {
+	export ASSUME_ROLE_QUIET=true
+	export VALKEY_ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::111122223333:role/valkey"
+	run_script assume_role
+	[ "$status" -eq 0 ]
+	assert_equal "$captured_stderr" ""
+	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "ASSUMEDKEY"
+}
+
+@test "still reports a failed assume role when quiet" {
+	export ASSUME_ROLE_QUIET=true
+	export VALKEY_ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::111122223333:role/valkey"
+	export MOCK_STS_EXIT=1
+	run_script assume_role
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "sts:AssumeRole failed"
+}

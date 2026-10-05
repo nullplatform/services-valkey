@@ -1,7 +1,13 @@
 #!/bin/bash
 
+_ar_info() {
+  if [ "${ASSUME_ROLE_QUIET:-}" != "true" ]; then
+    echo "$1" >&2
+  fi
+}
+
 if [ -n "${VALKEY_ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
-  echo "   🔑 Assuming role: $VALKEY_ASSUME_ROLE_ARN_RESOLVED" >&2
+  _ar_info "   🔑 Assuming role: $VALKEY_ASSUME_ROLE_ARN_RESOLVED"
 
   _ar_sts_error=$(mktemp)
   if ! ASSUMED_CREDS=$(aws sts assume-role \
@@ -28,7 +34,7 @@ if [ -n "${VALKEY_ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   export AWS_SECRET_ACCESS_KEY="$_ar_secret_key"
   export AWS_SESSION_TOKEN="$_ar_session_token"
 
-  echo "   ✅ Role assumed successfully" >&2
+  _ar_info "   ✅ Role assumed successfully"
 else
-  echo "   ✅ assume_role=skipped (using agent credentials)" >&2
+  _ar_info "   ✅ assume_role=skipped (using agent credentials)"
 fi

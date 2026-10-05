@@ -58,3 +58,10 @@ run_entrypoint() {
 	assert_contains "$(cat "$MOCK_LOG")" "--workflow $SERVICE_PATH/workflows/aws/log.yaml"
 	assert_not_contains "$(cat "$MOCK_LOG")" "service-action exec"
 }
+
+@test "silences the assume role progress in the metric workflow only" {
+	run grep -A3 "file: \$SERVICE_PATH/utils/assume_role_step" "$SERVICE_PATH/workflows/aws/metric.yaml"
+	assert_contains "$output" 'ASSUME_ROLE_QUIET: "true"'
+	run grep -l "ASSUME_ROLE_QUIET" "$SERVICE_PATH"/workflows/aws/create.yaml "$SERVICE_PATH"/workflows/aws/link.yaml
+	[ "$status" -ne 0 ]
+}
