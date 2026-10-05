@@ -4,13 +4,6 @@ set -euo pipefail
 EMPTY_CACHE_ECPU_PER_SECOND=30000
 MINIMUM_METERED_STORAGE_BYTES=104857600
 
-if ! type -t service_attributes >/dev/null 2>&1; then
-  service_attributes() {
-    local service_id="$1"
-    np service read --id "$service_id" --format json | jq -c '.attributes // {}'
-  }
-fi
-
 metric_config() {
   case "$1" in
   ElastiCacheProcessingUnits) echo "count Sum ElastiCacheProcessingUnits raw" ;;
@@ -80,14 +73,6 @@ require_timestamp start_time "$START_TIME"
 require_timestamp end_time "$END_TIME"
 
 SERVICE_ATTRS=$(echo "$ARGUMENTS" | jq -c '.service.attributes // {}')
-if [ "$(echo "$SERVICE_ATTRS" | jq -r '.cache_name // ""')" = "" ]; then
-  SERVICE_ID=$(echo "$ARGUMENTS" | jq -r '.service.id // .service_id // ""')
-  if [ -z "$SERVICE_ID" ]; then
-    echo "ERROR: the metric request carries no service id." >&2
-    exit 1
-  fi
-  SERVICE_ATTRS=$(service_attributes "$SERVICE_ID")
-fi
 
 CACHE_NAME=$(echo "$SERVICE_ATTRS" | jq -r '.cache_name // ""')
 REGION=$(echo "$SERVICE_ATTRS" | jq -r '.valkey_arn // "" | split(":") | .[3] // ""')
@@ -108,7 +93,10 @@ if [ -n "$AWS_PROFILE_VAL" ]; then
   export AWS_PROFILE="$AWS_PROFILE_VAL"
 fi
 
-if ! RESPONSE=$(aws cloudwatch get-metric-statistics \
+WORK_DIR=$(mktemp -d)
+trap 'rm -f "$WORK_DIR"/*; rmdir "$WORK_DIR"' EXIT
+
+aws cloudwatch get-metric-statistics \
   --region "$REGION" \
   --namespace AWS/ElastiCache \
   --metric-name "$SOURCE_METRIC" \
@@ -117,17 +105,30 @@ if ! RESPONSE=$(aws cloudwatch get-metric-statistics \
   --end-time "$END_TIME" \
   --period "$PERIOD" \
   --statistics "$STATISTIC" \
-  --output json); then
+  --output json >"$WORK_DIR/metric.json" 2>"$WORK_DIR/metric.err" &
+METRIC_PID=$!
+
+LIMITS_PID=""
+if [ "$KIND" != "raw" ]; then
+  cache_usage_limits >"$WORK_DIR/limits.json" 2>"$WORK_DIR/limits.err" &
+  LIMITS_PID=$!
+fi
+
+if ! wait "$METRIC_PID"; then
+  cat "$WORK_DIR/metric.err" >&2
   echo "ERROR: CloudWatch rejected the ${SOURCE_METRIC} query for ${CACHE_NAME} in ${REGION}." >&2
   exit 1
 fi
+RESPONSE=$(cat "$WORK_DIR/metric.json")
 
 LIMITS='{}'
-if [ "$KIND" != "raw" ]; then
-  if ! LIMITS=$(cache_usage_limits); then
+if [ -n "$LIMITS_PID" ]; then
+  if ! wait "$LIMITS_PID"; then
+    cat "$WORK_DIR/limits.err" >&2
     echo "ERROR: could not read the usage limits of ${CACHE_NAME} in ${REGION}." >&2
     exit 1
   fi
+  LIMITS=$(cat "$WORK_DIR/limits.json")
 fi
 
 RESULT=$(echo "$RESPONSE" | jq -c \

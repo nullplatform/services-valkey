@@ -24,22 +24,22 @@ setup_mocks() {
 	if [ -z "${MOCK_CW_RESPONSE+set}" ]; then
 		MOCK_CW_RESPONSE='{"Label":"x","Datapoints":[]}'
 	fi
-	if [ -z "${MOCK_NP_SERVICE+set}" ]; then
-		MOCK_NP_SERVICE='{"attributes":{}}'
-	fi
 	export MOCK_EC_EXIT="${MOCK_EC_EXIT:-0}"
 	if [ -z "${MOCK_EC_CACHES+set}" ]; then
 		MOCK_EC_CACHES='{"ServerlessCaches":[{"ServerlessCacheName":"np-my-cache-0f3a6"}]}'
 	fi
-	export MOCK_CW_RESPONSE MOCK_NP_SERVICE MOCK_EC_EXIT MOCK_EC_CACHES
+	export MOCK_CW_RESPONSE MOCK_EC_EXIT MOCK_EC_CACHES
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
-	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH ASSUME_ROLE_QUIET
+	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH ASSUME_ROLE_QUIET MOCK_AWS_DELAY
 	export VALKEY_S3_STATE_BUCKET="${VALKEY_S3_STATE_BUCKET-np-valkey-state}"
 
 	cat > "$MOCK_BIN/aws" <<'MOCK'
 #!/bin/bash
 echo "aws $*" >> "$MOCK_LOG"
+if [ -n "${MOCK_AWS_DELAY:-}" ]; then
+	sleep "$MOCK_AWS_DELAY"
+fi
 case "$*" in
 	*"s3api head-bucket"*)
 		[ "$MOCK_BUCKET_EXISTS" = "0" ] && printf '{\n    "BucketArn": "arn:aws:s3:::b",\n    "BucketRegion": "us-east-1",\n    "AccessPointAlias": false\n}\n'
@@ -90,10 +90,6 @@ MOCK
 	cat > "$MOCK_BIN/np" <<'MOCK'
 #!/bin/bash
 echo "np $*" >> "$MOCK_LOG"
-if [ "$1 $2" = "service read" ]; then
-	echo "$MOCK_NP_SERVICE"
-	exit 0
-fi
 if [ "$1 $2" != "provider list" ]; then
 	echo "{}"
 	exit 0

@@ -74,14 +74,11 @@ setup() {
 	[[ "$(cat "$MOCK_LOG")" =~ --start-time\ [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\ --end-time\ [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z ]]
 }
 
-@test "reads the cache from the service when the request carries no attributes" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.arguments.service.attributes, .arguments.service_id)')
-	export MOCK_NP_SERVICE
-	MOCK_NP_SERVICE=$(cache_service)
+@test "never reads the service from the api because the request always carries its attributes" {
+	CONTEXT=$(echo "$CONTEXT" | jq 'del(.arguments.service.attributes)')
 	run_script fetch_metric
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "np service read --id 0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 --format json"
-	assert_contains "$(cat "$MOCK_LOG")" "Value=np-my-cache-0f3a6"
+	assert_not_contains "$(cat "$MOCK_LOG")" "np service read"
 }
 
 @test "returns an empty series without calling cloudwatch while the cache does not exist yet" {
@@ -107,13 +104,6 @@ setup() {
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "is not a UTC ISO 8601 timestamp"
 	assert_not_contains "$(cat "$MOCK_LOG")" "cloudwatch"
-}
-
-@test "fails when the request does not identify the service" {
-	CONTEXT=$(echo "$CONTEXT" | jq 'del(.arguments.service, .arguments.service_id)')
-	run_script fetch_metric
-	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "carries no service id"
 }
 
 @test "fails when the cache arn does not carry a valid region" {
@@ -192,4 +182,34 @@ setup() {
 	run_script fetch_metric
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "could not read the usage limits of np-my-cache-0f3a6 in us-west-2"
+}
+
+@test "queries cloudwatch and the cache limits at the same time" {
+	export MOCK_AWS_DELAY=2
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage"')
+	started=$(perl -MTime::HiRes=time -e 'printf "%d", time * 1000')
+	run_script fetch_metric
+	elapsed=$(($(perl -MTime::HiRes=time -e 'printf "%d", time * 1000') - started))
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "cloudwatch get-metric-statistics"
+	assert_contains "$(cat "$MOCK_LOG")" "elasticache describe-serverless-caches"
+	[ "$elapsed" -lt 3500 ]
+}
+
+@test "reports the cloudwatch error even when the limits query succeeds" {
+	export MOCK_CW_EXIT=254
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond"')
+	run_script fetch_metric
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "AccessDenied"
+	assert_contains "$captured_stderr" "CloudWatch rejected the ElastiCacheProcessingUnits query"
+}
+
+@test "leaves no temporary files behind" {
+	export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+	mkdir -p "$TMPDIR"
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(ls -A "$TMPDIR")" ""
 }
