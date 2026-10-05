@@ -27,7 +27,11 @@ setup_mocks() {
 	if [ -z "${MOCK_NP_SERVICE+set}" ]; then
 		MOCK_NP_SERVICE='{"attributes":{}}'
 	fi
-	export MOCK_CW_RESPONSE MOCK_NP_SERVICE
+	export MOCK_EC_EXIT="${MOCK_EC_EXIT:-0}"
+	if [ -z "${MOCK_EC_CACHES+set}" ]; then
+		MOCK_EC_CACHES='{"ServerlessCaches":[{"ServerlessCacheName":"np-my-cache-0f3a6"}]}'
+	fi
+	export MOCK_CW_RESPONSE MOCK_NP_SERVICE MOCK_EC_EXIT MOCK_EC_CACHES
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
 	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH ASSUME_ROLE_QUIET
@@ -68,6 +72,12 @@ case "$*" in
 			exit "$MOCK_CW_EXIT"
 		fi
 		echo "$MOCK_CW_RESPONSE" ;;
+	"elasticache describe-serverless-caches"*)
+		if [ "$MOCK_EC_EXIT" != "0" ]; then
+			echo "An error occurred (AccessDenied) when calling the DescribeServerlessCaches operation" >&2
+			exit "$MOCK_EC_EXIT"
+		fi
+		echo "$MOCK_EC_CACHES" ;;
 	*"s3api list-object-versions"*) echo "$MOCK_LIST_VERSIONS" ;;
 	*"s3api delete-objects"*)
 		for arg in "$@"; do

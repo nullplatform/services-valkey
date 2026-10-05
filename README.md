@@ -53,6 +53,22 @@ module "valkey_requirements" {
 
 To apply it as a root module instead, copy `terraform.tfvars.example` to `terraform.tfvars` and fill it in — it lists every variable, with the optional ones commented out at their defaults.
 
+**Permissions to request.** These are the permissions the module grants. In an account that does not use assume role, grant them to the agent role instead.
+
+| Area | Actions | Scope |
+| :---- | :---- | :---- |
+| Caches | `elasticache:*` | Serverless caches, user groups and users named `np-*` |
+| Caches | `elasticache:CreateUserGroup`, `ModifyUserGroup`, `DeleteUserGroup`, `CreateServerlessCache`, `ModifyServerlessCache` | All users and user groups (needed to reference them) |
+| Caches | `elasticache:Describe*`, `ListTagsForResource` | `*` |
+| Caches | `iam:CreateServiceLinkedRole` | `AWSServiceRoleForElastiCache` only |
+| Metrics | `cloudwatch:GetMetricStatistics` | `*` (no resource-level permissions) |
+| Network | `ec2:CreateSecurityGroup`, `CreateTags` and rule management | Security groups tagged `managed-by=nullplatform` |
+| Network | `ec2:CreateVpcEndpoint`, `ModifyVpcEndpoint`, `DeleteVpcEndpoints`, `CreateTags` | Endpoints ElastiCache Serverless creates for each cache (`AmazonElastiCacheManaged=true`) |
+| Network | `ec2:Describe*` on VPCs, subnets, security groups, endpoints, route tables, prefix lists, ENIs and tags | `*` |
+| Encryption | `kms:CreateKey` and key management | Keys tagged `managed-by=nullplatform`, aliases `nullplatform-valkey-*` |
+| Encryption | `kms:DescribeKey`, `CreateGrant` for ElastiCache | Only the keys in `external_kms_key_arns`, when set |
+| State | `s3:ListBucket`, `GetObject`, `PutObject`, `DeleteObject` and their versions | The `state_bucket_name` bucket |
+
 **2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
 
 **3. Create the state bucket.** Create a single S3 bucket that every valkey service shares for its tofu state, enable versioning on it, and pass its name to the requirements module as `state_bucket_name`. The agent must receive the same name in the environment variable `VALKEY_S3_STATE_BUCKET`. The service never creates or deletes this bucket: if it is missing, every action fails with a clear error.
@@ -93,7 +109,7 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 
 ## Metrics
 
-`metric:list` and `metric:data` notifications run `workflows/aws/metric-list.yaml` and `workflows/aws/metric.yaml`. The data workflow assumes the permissions role and reads `AWS/ElastiCache` with the dimension `clusterId = cache_name`, in the region of the cache ARN, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
+`metric:list` and `metric:data` notifications run `workflows/aws/metric-list.yaml` and `workflows/aws/metric.yaml`. The data workflow reads `AWS/ElastiCache` with the dimension `clusterId = cache_name`, in the region of the cache ARN, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
 
 | Metric | Statistic | Unit |
 | :---- | :---- | :---- |
@@ -103,6 +119,10 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 | `CurrConnections` | Maximum | count |
 | `SuccessfulReadRequestLatency` | Average | microseconds |
 | `ThrottledCmds` | Sum | count |
+| `AvailableECPUPerSecond` | ECPU/s ceiling minus ECPU/s used | count |
+| `BilledDataStorage` | Largest of storage used, configured minimum and 100 MB | bytes |
+
+The ECPU/s ceiling is the cache's configured maximum, or 30,000 when none is set (what AWS supports on an empty cache). 100 MB is the minimum data storage AWS meters for Valkey. These two read the cache's usage limits and have a value even on an idle cache.
 
 A service whose cache does not exist yet returns an empty series. A CloudWatch error fails the request instead of showing an empty graph.
 

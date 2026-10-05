@@ -105,7 +105,7 @@ setup() {
 	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.start_time = "yesterday --region evil"')
 	run_script fetch_metric
 	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "is not an ISO 8601 timestamp"
+	assert_contains "$captured_stderr" "is not a UTC ISO 8601 timestamp"
 	assert_not_contains "$(cat "$MOCK_LOG")" "cloudwatch"
 }
 
@@ -129,4 +129,67 @@ setup() {
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "AccessDenied"
 	assert_contains "$captured_stderr" "CloudWatch rejected the CacheHitRate query for np-my-cache-0f3a6 in us-west-2"
+}
+
+@test "reports the ecpus per second an idle cache still has available" {
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:15:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "--metric-name ElastiCacheProcessingUnits "
+	assert_contains "$(cat "$MOCK_LOG")" "--statistics Sum "
+	assert_contains "$(cat "$MOCK_LOG")" "aws elasticache describe-serverless-caches --region us-west-2 --serverless-cache-name np-my-cache-0f3a6"
+	assert_equal "$(echo "$captured_stdout" | jq -c '.results[0].data')" '[{"timestamp":"2026-10-02T10:00:00Z","value":30000},{"timestamp":"2026-10-02T10:05:00Z","value":30000},{"timestamp":"2026-10-02T10:10:00Z","value":30000}]'
+	assert_equal "$(echo "$captured_stdout" | jq -r '.unit')" "count"
+	assert_equal "$captured_stderr" ""
+}
+
+@test "subtracts the ecpus used per second from the configured maximum" {
+	export MOCK_EC_CACHES='{"ServerlessCaches":[{"CacheUsageLimits":{"ECPUPerSecond":{"Maximum":5000}}}]}'
+	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:05:00+00:00","Sum":300000}]}'
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[5000,4000]'
+}
+
+@test "never reports negative available ecpus" {
+	export MOCK_EC_CACHES='{"ServerlessCaches":[{"CacheUsageLimits":{"ECPUPerSecond":{"Maximum":100}}}]}'
+	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:00:00+00:00","Sum":300000}]}'
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:05:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[0]'
+}
+
+@test "bills at least the 100 MB minimum for valkey on an empty cache" {
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "--metric-name BytesUsedForCache "
+	assert_contains "$(cat "$MOCK_LOG")" "--statistics Maximum "
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[104857600,104857600]'
+	assert_equal "$(echo "$captured_stdout" | jq -r '.unit')" "bytes"
+}
+
+@test "bills the configured minimum or the usage when either is larger" {
+	export MOCK_EC_CACHES='{"ServerlessCaches":[{"CacheUsageLimits":{"DataStorage":{"Minimum":2,"Unit":"GB"}}}]}'
+	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:05:00+00:00","Maximum":5000000000}]}'
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[2147483648,5000000000]'
+}
+
+@test "does not read the cache limits for plain cloudwatch metrics" {
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_not_contains "$(cat "$MOCK_LOG")" "describe-serverless-caches"
+}
+
+@test "fails when the cache limits cannot be read" {
+	export MOCK_EC_EXIT=254
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage"')
+	run_script fetch_metric
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "could not read the usage limits of np-my-cache-0f3a6 in us-west-2"
 }
