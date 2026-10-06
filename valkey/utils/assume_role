@@ -1,18 +1,10 @@
 #!/bin/bash
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bench"
-
-_ar_info() {
-  if [ "${ASSUME_ROLE_QUIET:-}" != "true" ]; then
-    echo "$1" >&2
-  fi
-}
-
 if [ -n "${VALKEY_ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
-  _ar_info "   🔑 Assuming role: $VALKEY_ASSUME_ROLE_ARN_RESOLVED"
+  echo "   🔑 Assuming role: $VALKEY_ASSUME_ROLE_ARN_RESOLVED"
 
   _ar_sts_error=$(mktemp)
-  if ! ASSUMED_CREDS=$(timed "assume role: sts assume-role" aws sts assume-role \
+  if ! ASSUMED_CREDS=$(aws sts assume-role \
     --role-arn "$VALKEY_ASSUME_ROLE_ARN_RESOLVED" \
     --role-session-name "np-valkey-${SERVICE_ID:-workflow}" \
     --output json 2>"$_ar_sts_error"); then
@@ -36,7 +28,7 @@ if [ -n "${VALKEY_ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   export AWS_SECRET_ACCESS_KEY="$_ar_secret_key"
   export AWS_SESSION_TOKEN="$_ar_session_token"
 
-  _ar_info "   ✅ Role assumed successfully"
+  echo "   ✅ Role assumed successfully"
 else
-  _ar_info "   ✅ assume_role=skipped (using agent credentials)"
+  echo "   ✅ assume_role=skipped (using agent credentials)"
 fi

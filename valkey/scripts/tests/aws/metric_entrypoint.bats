@@ -29,33 +29,15 @@ run_metric() {
 	assert_equal "$(cat "$MOCK_LOG")" ""
 }
 
-@test "answers metric:data with only the metric result when no role is published" {
+@test "answers metric:data with only the metric result and no provider lookup" {
 	run_metric "metric:data"
 	[ "$status" -eq 0 ]
 	assert_equal "$(echo "$captured_stdout" | jq -r '.metric')" "CacheHitRate"
 	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
 	assert_equal "$captured_stderr" ""
-	assert_contains "$(cat "$MOCK_LOG")" "np provider list --nrn organization=1:account=2:namespace=3:application=4 --categories identity-access-control"
+	assert_not_contains "$(cat "$MOCK_LOG")" "np provider list"
+	assert_not_contains "$(cat "$MOCK_LOG")" "sts"
 	assert_contains "$(cat "$MOCK_LOG")" "cloudwatch credentials: agent"
-}
-
-@test "queries cloudwatch with the valkey role when the provider publishes one" {
-	export MOCK_NP_IAM_PROVIDERS='{"results":[{"attributes":{"iam_role_arns":{"arns":[{"selector":"valkey","arn":"arn:aws:iam::111122223333:role/valkey"}]}}}]}'
-	run_metric "metric:data"
-	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "aws sts assume-role --role-arn arn:aws:iam::111122223333:role/valkey"
-	assert_contains "$(cat "$MOCK_LOG")" "cloudwatch credentials: ASIAVALKEYROLE"
-	assert_equal "$captured_stderr" ""
-}
-
-@test "fails without querying cloudwatch when the role cannot be assumed" {
-	export MOCK_NP_IAM_PROVIDERS='{"results":[{"attributes":{"iam_role_arns":{"arns":[{"selector":"valkey","arn":"arn:aws:iam::111122223333:role/valkey"}]}}}]}'
-	export MOCK_STS_EXIT=254
-	run_metric "metric:data"
-	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "sts:AssumeRole failed"
-	assert_not_contains "$(cat "$MOCK_LOG")" "cloudwatch"
-	assert_equal "$captured_stdout" ""
 }
 
 @test "never goes through np service workflow exec" {
@@ -96,7 +78,7 @@ run_metric() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(echo "$captured_stdout" | jq -r '.metric')" "BilledDataStorage"
 	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
-	for step in "assume role: np provider list identity-access-control" "metric: assume role step" "fetch_metric: parse request" "fetch_metric: aws cloudwatch get-metric-statistics BytesUsedForCache" "fetch_metric: aws elasticache describe-serverless-caches" "fetch_metric: all aws calls done" "fetch_metric: build result" "fetch_metric: total"; do
+	for step in "fetch_metric: parse request" "fetch_metric: aws cloudwatch get-metric-statistics BytesUsedForCache" "fetch_metric: build result" "fetch_metric: total"; do
 		assert_contains "$captured_stderr" "[benchmark]"
 		assert_contains "$captured_stderr" "$step"
 	done

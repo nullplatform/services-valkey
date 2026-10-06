@@ -24,28 +24,16 @@ setup_mocks() {
 	if [ -z "${MOCK_CW_RESPONSE+set}" ]; then
 		MOCK_CW_RESPONSE='{"Label":"x","Datapoints":[]}'
 	fi
-	export MOCK_EC_EXIT="${MOCK_EC_EXIT:-0}"
-	export MOCK_STS_EXIT="${MOCK_STS_EXIT:-0}"
-	if [ -z "${MOCK_NP_IAM_PROVIDERS+set}" ]; then
-		MOCK_NP_IAM_PROVIDERS='{"results":[]}'
-	fi
-	export MOCK_NP_IAM_PROVIDERS
-	if [ -z "${MOCK_EC_CACHES+set}" ]; then
-		MOCK_EC_CACHES='{"ServerlessCaches":[{"ServerlessCacheName":"np-my-cache-0f3a6"}]}'
-	fi
-	export MOCK_CW_RESPONSE MOCK_EC_EXIT MOCK_EC_CACHES
+	export MOCK_CW_RESPONSE
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
-	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH ASSUME_ROLE_QUIET MOCK_AWS_DELAY BENCH_START_MS
+	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH BENCH_START_MS
 	export VALKEY_BENCHMARK=false
 	export VALKEY_S3_STATE_BUCKET="${VALKEY_S3_STATE_BUCKET-np-valkey-state}"
 
 	cat > "$MOCK_BIN/aws" <<'MOCK'
 #!/bin/bash
 echo "aws $*" >> "$MOCK_LOG"
-if [ -n "${MOCK_AWS_DELAY:-}" ]; then
-	sleep "$MOCK_AWS_DELAY"
-fi
 case "$*" in
 	*"s3api head-bucket"*)
 		[ "$MOCK_BUCKET_EXISTS" = "0" ] && printf '{\n    "BucketArn": "arn:aws:s3:::b",\n    "BucketRegion": "us-east-1",\n    "AccessPointAlias": false\n}\n'
@@ -72,12 +60,6 @@ case "$*" in
 			fi
 			printf '%s' "$MOCK_STATE_JSON" > "$dest" ;;
 		esac ;;
-	"sts assume-role"*)
-		if [ "$MOCK_STS_EXIT" != "0" ]; then
-			echo "An error occurred (AccessDenied) when calling the AssumeRole operation" >&2
-			exit "$MOCK_STS_EXIT"
-		fi
-		echo '{"Credentials":{"AccessKeyId":"ASIAVALKEYROLE","SecretAccessKey":"role-secret","SessionToken":"role-token"}}' ;;
 	"cloudwatch get-metric-statistics"*)
 		echo "cloudwatch credentials: ${AWS_ACCESS_KEY_ID:-agent}" >> "$MOCK_LOG"
 		if [ "$MOCK_CW_EXIT" != "0" ]; then
@@ -85,12 +67,6 @@ case "$*" in
 			exit "$MOCK_CW_EXIT"
 		fi
 		echo "$MOCK_CW_RESPONSE" ;;
-	"elasticache describe-serverless-caches"*)
-		if [ "$MOCK_EC_EXIT" != "0" ]; then
-			echo "An error occurred (AccessDenied) when calling the DescribeServerlessCaches operation" >&2
-			exit "$MOCK_EC_EXIT"
-		fi
-		echo "$MOCK_EC_CACHES" ;;
 	*"s3api list-object-versions"*) echo "$MOCK_LIST_VERSIONS" ;;
 	*"s3api delete-objects"*)
 		for arg in "$@"; do
@@ -118,7 +94,6 @@ for arg in "$@"; do
 done
 case "$category" in
 	cloud-providers) echo "$MOCK_NP_CLOUD_PROVIDERS" ;;
-	identity-access-control) echo "$MOCK_NP_IAM_PROVIDERS" ;;
 	vpc) echo "$MOCK_NP_VPC_PROVIDERS" ;;
 	*) echo '{"results":[]}' ;;
 esac

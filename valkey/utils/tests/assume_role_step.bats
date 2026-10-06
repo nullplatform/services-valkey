@@ -73,7 +73,7 @@ iam_provider_attributes() {
 	MOCK_NP_PROVIDERS=$(jq -n --argjson attrs "$(iam_provider_attributes)" '{results: [{attributes: $attrs}]}')
 	run_script assume_role_step
 	[ "$status" -eq 0 ]
-	assert_contains "$captured_stderr" "Role assumed successfully"
+	assert_contains "$captured_stdout" "Role assumed successfully"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "ASSUMEDKEY"
 }
 
@@ -81,7 +81,7 @@ iam_provider_attributes() {
 	export CONTEXT='{"service":{"nrn":"organization=1:account=2"}}'
 	run_script assume_role_step
 	[ "$status" -eq 0 ]
-	assert_contains "$captured_stderr" "assume_role=skipped"
+	assert_contains "$captured_stdout" "assume_role=skipped"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
 }
 
@@ -95,18 +95,4 @@ iam_provider_attributes() {
 	assert_contains "$captured_stderr" "assume_role step failed"
 	assert_contains "$captured_stderr" "Possible causes"
 	assert_contains "$captured_stderr" "organization=1:account=2"
-}
-
-@test "prints nothing on stdout so a metric workflow response stays valid json" {
-	export CONTEXT='{"service":{"nrn":"organization=1:account=2"}}'
-	run_script assume_role_step
-	[ "$status" -eq 0 ]
-	assert_equal "$captured_stdout" ""
-
-	export MOCK_NP_PROVIDERS
-	MOCK_NP_PROVIDERS=$(jq -n --argjson attrs "$(iam_provider_attributes)" '{results: [{attributes: $attrs}]}')
-	run_script assume_role_step
-	[ "$status" -eq 0 ]
-	assert_contains "$captured_stderr" "Role assumed successfully"
-	assert_equal "$captured_stdout" ""
 }

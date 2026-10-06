@@ -61,13 +61,14 @@ To apply it as a root module instead, copy `terraform.tfvars.example` to `terraf
 | Caches | `elasticache:CreateUserGroup`, `ModifyUserGroup`, `DeleteUserGroup`, `CreateServerlessCache`, `ModifyServerlessCache` | All users and user groups (needed to reference them) |
 | Caches | `elasticache:Describe*`, `ListTagsForResource` | `*` |
 | Caches | `iam:CreateServiceLinkedRole` | `AWSServiceRoleForElastiCache` only |
-| Metrics | `cloudwatch:GetMetricStatistics` | `*` (no resource-level permissions) |
 | Network | `ec2:CreateSecurityGroup`, `CreateTags` and rule management | Security groups tagged `managed-by=nullplatform` |
 | Network | `ec2:CreateVpcEndpoint`, `ModifyVpcEndpoint`, `DeleteVpcEndpoints`, `CreateTags` | Endpoints ElastiCache Serverless creates for each cache (`AmazonElastiCacheManaged=true`) |
 | Network | `ec2:Describe*` on VPCs, subnets, security groups, endpoints, route tables, prefix lists, ENIs and tags | `*` |
 | Encryption | `kms:CreateKey` and key management | Keys tagged `managed-by=nullplatform`, aliases `nullplatform-valkey-*` |
 | Encryption | `kms:DescribeKey`, `CreateGrant` for ElastiCache | Only the keys in `external_kms_key_arns`, when set |
 | State | `s3:ListBucket`, `GetObject`, `PutObject`, `DeleteObject` and their versions | The `state_bucket_name` bucket |
+
+The agent role itself always needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role, so they cost a single AWS call.
 
 **2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
 
@@ -109,7 +110,7 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 
 ## Metrics
 
-`metric:list` and `metric:data` notifications run `scripts/aws/list_metrics` and `scripts/aws/fetch_metric` directly from `entrypoint/metric`, without `np service workflow exec`. `metric:data` first assumes the permissions role, silently, and then reads `AWS/ElastiCache` with the dimension `clusterId = cache_name`, in the region of the cache ARN, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
+`metric:list` and `metric:data` notifications run `scripts/aws/list_metrics` and `scripts/aws/fetch_metric` directly from `entrypoint/metric`, without `np service workflow exec` and without assuming the permissions role. `metric:data` makes one AWS call, to CloudWatch: `AWS/ElastiCache` with the dimension `clusterId = cache_name`, in the region of the cache ARN, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
 
 | Metric | Statistic | Unit |
 | :---- | :---- | :---- |
@@ -119,10 +120,10 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 | `CurrConnections` | Maximum | count |
 | `SuccessfulReadRequestLatency` | Average | microseconds |
 | `ThrottledCmds` | Sum | count |
-| `AvailableECPUPerSecond` | ECPU/s ceiling minus ECPU/s used | count |
-| `BilledDataStorage` | Largest of storage used, configured minimum and 100 MB | bytes |
+| `AvailableECPUPerSecond` | 30,000 minus ECPU/s used | count |
+| `BilledDataStorage` | Larger of storage used and 100 MB | bytes |
 
-The ECPU/s ceiling is the cache's configured maximum, or 30,000 when none is set (what AWS supports on an empty cache). 100 MB is the minimum data storage AWS meters for Valkey. These two read the cache's usage limits and have a value even on an idle cache.
+The ECPU/s ceiling is 30,000, what AWS supports on an empty cache, and 100 MB is the minimum data storage AWS meters for Valkey. Both have a value even on an idle cache. They ignore usage limits set on the cache by hand, which this service never configures.
 
 A service whose cache does not exist yet returns an empty series. A CloudWatch error fails the request instead of showing an empty graph.
 

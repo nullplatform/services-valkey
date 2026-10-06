@@ -14,18 +14,21 @@ if [ -n "${NP_API_KEY:-}" ] && [ -z "${NULLPLATFORM_API_KEY:-}" ]; then
 fi
 
 PARSE_STARTED=$(bench_now)
-CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
+CLEAN_CONTEXT="${NP_ACTION_CONTEXT#\'}"
+CLEAN_CONTEXT="${CLEAN_CONTEXT%\'}"
 export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
 
-CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
-SERVICE_ACTION=$(echo "$CONTEXT"      | jq -r '.slug')
-SERVICE_ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type')
-NOTIFICATION_ACTION=$(echo "$CONTEXT" | jq -r '.action')
-LINK=$(echo "$CONTEXT"                | jq '.link')
+eval "$(printf '%s' "$CLEAN_CONTEXT" | jq -r '
+  .notification as $notification
+  | @sh "CONTEXT=\($notification | tojson)
+SERVICE_ACTION=\($notification.slug | tostring)
+SERVICE_ACTION_TYPE=\($notification.type | tostring)
+NOTIFICATION_ACTION=\($notification.action | tostring)
+LINK=\($notification.link | tojson)
+IS_LINK_ACTION=\($notification.link != null | tostring)"')"
 export CONTEXT SERVICE_ACTION SERVICE_ACTION_TYPE NOTIFICATION_ACTION LINK
 
 ACTION_SOURCE=service
-IS_LINK_ACTION=$(echo "$CONTEXT" | jq '.link != null')
 
 if [ "$IS_LINK_ACTION" = "true" ]; then
   ACTION_SOURCE="link"

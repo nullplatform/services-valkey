@@ -9,7 +9,7 @@ setup() {
 @test "skips assuming a role when no role arn was resolved" {
 	run_script assume_role
 	[ "$status" -eq 0 ]
-	assert_contains "$captured_stderr" "assume_role=skipped"
+	assert_contains "$captured_stdout" "assume_role=skipped"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
 	assert_not_contains "$(cat "$MOCK_LOG")" "aws sts"
 }
@@ -19,7 +19,7 @@ setup() {
 	export SERVICE_ID="abc123"
 	run_script assume_role
 	[ "$status" -eq 0 ]
-	assert_contains "$captured_stderr" "Role assumed successfully"
+	assert_contains "$captured_stdout" "Role assumed successfully"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "ASSUMEDKEY"
 	assert_equal "$(captured AWS_SECRET_ACCESS_KEY)" "assumedsecret"
 	assert_equal "$(captured AWS_SESSION_TOKEN)" "assumedtoken"
@@ -50,30 +50,4 @@ setup() {
 	[ "$status" -eq 1 ]
 	assert_contains "$captured_stderr" "incomplete credentials"
 	assert_equal "$(captured AWS_ACCESS_KEY_ID)" ""
-}
-
-@test "stays silent when quiet and no role arn was resolved" {
-	export ASSUME_ROLE_QUIET=true
-	run_script assume_role
-	[ "$status" -eq 0 ]
-	assert_equal "$captured_stdout" ""
-	assert_equal "$captured_stderr" ""
-}
-
-@test "stays silent when quiet and the role is assumed" {
-	export ASSUME_ROLE_QUIET=true
-	export VALKEY_ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::111122223333:role/valkey"
-	run_script assume_role
-	[ "$status" -eq 0 ]
-	assert_equal "$captured_stderr" ""
-	assert_equal "$(captured AWS_ACCESS_KEY_ID)" "ASSUMEDKEY"
-}
-
-@test "still reports a failed assume role when quiet" {
-	export ASSUME_ROLE_QUIET=true
-	export VALKEY_ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::111122223333:role/valkey"
-	export MOCK_STS_EXIT=1
-	run_script assume_role
-	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "sts:AssumeRole failed"
 }

@@ -127,28 +127,17 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_contains "$(cat "$MOCK_LOG")" "--metric-name ElastiCacheProcessingUnits "
 	assert_contains "$(cat "$MOCK_LOG")" "--statistics Sum "
-	assert_contains "$(cat "$MOCK_LOG")" "aws elasticache describe-serverless-caches --region us-west-2 --serverless-cache-name np-my-cache-0f3a6"
 	assert_equal "$(echo "$captured_stdout" | jq -c '.results[0].data')" '[{"timestamp":"2026-10-02T10:00:00Z","value":30000},{"timestamp":"2026-10-02T10:05:00Z","value":30000},{"timestamp":"2026-10-02T10:10:00Z","value":30000}]'
 	assert_equal "$(echo "$captured_stdout" | jq -r '.unit')" "count"
 	assert_equal "$captured_stderr" ""
 }
 
-@test "subtracts the ecpus used per second from the configured maximum" {
-	export MOCK_EC_CACHES='{"ServerlessCaches":[{"CacheUsageLimits":{"ECPUPerSecond":{"Maximum":5000}}}]}'
-	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:05:00+00:00","Sum":300000}]}'
+@test "never reports negative available ecpus" {
+	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:00:00+00:00","Sum":18000000}]}'
 	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
 	run_script fetch_metric
 	[ "$status" -eq 0 ]
-	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[5000,4000]'
-}
-
-@test "never reports negative available ecpus" {
-	export MOCK_EC_CACHES='{"ServerlessCaches":[{"CacheUsageLimits":{"ECPUPerSecond":{"Maximum":100}}}]}'
-	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:00:00+00:00","Sum":300000}]}'
-	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:05:00.000Z"')
-	run_script fetch_metric
-	[ "$status" -eq 0 ]
-	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[0]'
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[0,30000]'
 }
 
 @test "bills at least the 100 MB minimum for valkey on an empty cache" {
@@ -161,50 +150,6 @@ setup() {
 	assert_equal "$(echo "$captured_stdout" | jq -r '.unit')" "bytes"
 }
 
-@test "bills the configured minimum or the usage when either is larger" {
-	export MOCK_EC_CACHES='{"ServerlessCaches":[{"CacheUsageLimits":{"DataStorage":{"Minimum":2,"Unit":"GB"}}}]}'
-	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:05:00+00:00","Maximum":5000000000}]}'
-	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
-	run_script fetch_metric
-	[ "$status" -eq 0 ]
-	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[2147483648,5000000000]'
-}
-
-@test "does not read the cache limits for plain cloudwatch metrics" {
-	run_script fetch_metric
-	[ "$status" -eq 0 ]
-	assert_not_contains "$(cat "$MOCK_LOG")" "describe-serverless-caches"
-}
-
-@test "fails when the cache limits cannot be read" {
-	export MOCK_EC_EXIT=254
-	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage"')
-	run_script fetch_metric
-	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "could not read the usage limits of np-my-cache-0f3a6 in us-west-2"
-}
-
-@test "queries cloudwatch and the cache limits at the same time" {
-	export MOCK_AWS_DELAY=2
-	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage"')
-	started=$(perl -MTime::HiRes=time -e 'printf "%d", time * 1000')
-	run_script fetch_metric
-	elapsed=$(($(perl -MTime::HiRes=time -e 'printf "%d", time * 1000') - started))
-	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "cloudwatch get-metric-statistics"
-	assert_contains "$(cat "$MOCK_LOG")" "elasticache describe-serverless-caches"
-	[ "$elapsed" -lt 3500 ]
-}
-
-@test "reports the cloudwatch error even when the limits query succeeds" {
-	export MOCK_CW_EXIT=254
-	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond"')
-	run_script fetch_metric
-	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "AccessDenied"
-	assert_contains "$captured_stderr" "CloudWatch rejected the ElastiCacheProcessingUnits query"
-}
-
 @test "leaves no temporary files behind" {
 	export TMPDIR="$BATS_TEST_TMPDIR/tmp"
 	mkdir -p "$TMPDIR"
@@ -212,4 +157,46 @@ setup() {
 	run_script fetch_metric
 	[ "$status" -eq 0 ]
 	assert_equal "$(ls -A "$TMPDIR")" ""
+}
+
+@test "subtracts the ecpus used per second from the 30000 an empty cache supports" {
+	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:05:00+00:00","Sum":300000}]}'
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "AvailableECPUPerSecond" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[30000,29000]'
+}
+
+@test "bills the storage used once it is above the 100 MB minimum" {
+	export MOCK_CW_RESPONSE='{"Datapoints":[{"Timestamp":"2026-10-02T10:05:00+00:00","Maximum":5000000000}]}'
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage" | .arguments.start_time = "2026-10-02T10:00:00.000Z" | .arguments.end_time = "2026-10-02T10:10:00.000Z"')
+	run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | jq -c '[.results[0].data[].value]')" '[104857600,5000000000]'
+}
+
+@test "makes exactly one aws call and none to np for every metric" {
+	for metric in ElastiCacheProcessingUnits BytesUsedForCache CacheHitRate CurrConnections SuccessfulReadRequestLatency ThrottledCmds AvailableECPUPerSecond BilledDataStorage; do
+		CONTEXT=$(echo "$CONTEXT" | jq --arg metric "$metric" '.arguments.metric = $metric')
+		: >"$MOCK_LOG"
+		run_script fetch_metric
+		[ "$status" -eq 0 ]
+		assert_equal "$(grep -c '^aws ' "$MOCK_LOG")" "1"
+		assert_contains "$(grep '^aws ' "$MOCK_LOG")" "aws cloudwatch get-metric-statistics"
+		assert_not_contains "$(cat "$MOCK_LOG")" "np "
+	done
+}
+
+@test "reads aws_profile from values.yaml without spawning grep or sed" {
+	printf 'aws_profile: "sso-valkey"\nother: x\n' >"$VALUES"
+	mkdir -p "$BATS_TEST_TMPDIR/aws-env"
+	cat >"$BATS_TEST_TMPDIR/aws-env/aws" <<MOCK
+#!/bin/bash
+echo "profile=\${AWS_PROFILE:-none}" >>"$MOCK_LOG"
+exec "$MOCK_BIN/aws" "\$@"
+MOCK
+	chmod +x "$BATS_TEST_TMPDIR/aws-env/aws"
+	PATH="$BATS_TEST_TMPDIR/aws-env:$PATH" run_script fetch_metric
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "profile=sso-valkey"
 }

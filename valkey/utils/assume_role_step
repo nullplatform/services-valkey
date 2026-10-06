@@ -2,7 +2,6 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/assume_role_lib"
-source "$SCRIPT_DIR/bench"
 
 NRN=$(echo "${CONTEXT:-}" | jq -r '.entity_nrn // .service.nrn // .scope.nrn // ""' 2>/dev/null)
 
@@ -13,7 +12,7 @@ DIMENSIONS=$(echo "${CONTEXT:-}" | jq -r '
 
 VALKEY_ASSUME_ROLE_SELECTOR="${VALKEY_ASSUME_ROLE_SELECTOR:-valkey}"
 
-IAM_ATTRIBUTES=$(timed "assume role: np provider list identity-access-control" np provider list \
+IAM_ATTRIBUTES=$(np provider list \
   --nrn "$NRN" \
   --categories identity-access-control \
   ${DIMENSIONS:+--dimensions "$DIMENSIONS"} \
