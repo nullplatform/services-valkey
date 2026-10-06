@@ -20,9 +20,14 @@ setup_mocks() {
 		MOCK_NP_VPC_PROVIDERS='{"results":[{"attributes":{"vpc":{"id":"vpc-0123","subnets":["subnet-a","subnet-b"]}}}]}'
 	fi
 	export MOCK_NP_CLOUD_PROVIDERS MOCK_NP_VPC_PROVIDERS
+	export MOCK_CW_EXIT="${MOCK_CW_EXIT:-0}"
+	if [ -z "${MOCK_CW_RESPONSE+set}" ]; then
+		MOCK_CW_RESPONSE='{"Label":"x","Datapoints":[]}'
+	fi
+	export MOCK_CW_RESPONSE
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
-	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE
+	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH
 	export VALKEY_S3_STATE_BUCKET="${VALKEY_S3_STATE_BUCKET-np-valkey-state}"
 
 	cat > "$MOCK_BIN/aws" <<'MOCK'
@@ -54,6 +59,13 @@ case "$*" in
 			fi
 			printf '%s' "$MOCK_STATE_JSON" > "$dest" ;;
 		esac ;;
+	"cloudwatch get-metric-statistics"*)
+		echo "cloudwatch credentials: ${AWS_ACCESS_KEY_ID:-agent}" >> "$MOCK_LOG"
+		if [ "$MOCK_CW_EXIT" != "0" ]; then
+			echo "An error occurred (AccessDenied) when calling the GetMetricStatistics operation" >&2
+			exit "$MOCK_CW_EXIT"
+		fi
+		echo "$MOCK_CW_RESPONSE" ;;
 	*"s3api list-object-versions"*) echo "$MOCK_LIST_VERSIONS" ;;
 	*"s3api delete-objects"*)
 		for arg in "$@"; do
@@ -176,4 +188,18 @@ assert_not_contains() {
 		echo "actual: $1"
 		return 1
 	fi
+}
+
+metric_context() {
+	jq -n --argjson arguments "$1" '{arguments: $arguments}'
+}
+
+cache_service() {
+	jq -n '{
+		id: "0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718",
+		attributes: {
+			cache_name: "np-my-cache-0f3a6",
+			valkey_arn: "arn:aws:elasticache:us-west-2:222222222222:serverlesscache:np-my-cache-0f3a6"
+		}
+	}'
 }
