@@ -21,11 +21,11 @@ setup() {
 	assert_contains "$(cat "$MOCK_LOG")" "tofu apply -auto-approve -var=a=1 -var=b=2"
 }
 
-@test "runs the configured action when it is not apply" {
+@test "destroys from the state alone without refreshing it" {
 	export TOFU_ACTION=destroy
 	run_script do_tofu
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "tofu $TOFU_ACTION -auto-approve -var=a=1 -var=b=2"
+	assert_contains "$(cat "$MOCK_LOG")" "tofu destroy -auto-approve -refresh=false -var=a=1 -var=b=2"
 }
 
 @test "aborts before apply with guidance when init fails" {

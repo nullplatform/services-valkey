@@ -288,6 +288,31 @@ setup() {
 	assert_contains "$captured_stderr" "Using existing cache_name from service attributes: np-old-slug-0f3a6"
 }
 
+@test "takes the cache name from the user group in the state when a failed create left no attributes" {
+	CONTEXT=$(echo "$CONTEXT" | jq '.service.slug = "renamed"')
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_elasticache_user_group","name":"cache","instances":[{"attributes":{"user_group_id":"np-my-cache-0f3a6-ug"}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured CACHE_NAME)" "np-my-cache-0f3a6"
+	assert_contains "$captured_stderr" "Using cache_name from the tofu state: np-my-cache-0f3a6"
+}
+
+@test "prefers the cache name in the state over the service attributes" {
+	CONTEXT=$(service_context '{"cache_name":"np-other-0f3a6"}' "$(full_params)")
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_elasticache_user_group","name":"cache","instances":[{"attributes":{"user_group_id":"np-my-cache-0f3a6-ug"}}]}]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured CACHE_NAME)" "np-my-cache-0f3a6"
+}
+
+@test "does not leave a state file from an earlier run for the later steps" {
+	mkdir -p /tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718
+	echo '{"resources":[]}' > /tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/previous-state.json
+	run_script build_context
+	[ "$status" -eq 0 ]
+	[ ! -e /tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/previous-state.json ]
+}
+
 @test "passes the configured kms key on create when there is no state yet" {
 	export VALKEY_KMS_KEY_ARN="arn:aws:kms:us-west-2:222222222222:key/1234abcd-12ab-34cd-56ef-1234567890ab"
 	CONTEXT=$(service_context '{}' "$(full_params)" | jq '.type = "create"')
