@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.5](https://github.com/nullplatform/services-valkey/compare/v0.3.4...v0.3.5) (2026-10-02)
+
+
+### Bug Fixes
+
+* **deps:** bump actions/checkout from 4 to 7 ([#19](https://github.com/nullplatform/services-valkey/issues/19)) ([67293c5](https://github.com/nullplatform/services-valkey/commit/67293c5b944faacab72b85023f4876db7b791760))
+
+## [0.3.4](https://github.com/nullplatform/services-valkey/compare/v0.3.3...v0.3.4) (2026-10-02)
+
+
+### Bug Fixes
+
+* scope the vpc endpoint grant to elasticache serverless by service name ([#33](https://github.com/nullplatform/services-valkey/issues/33)) ([8b4b8c9](https://github.com/nullplatform/services-valkey/commit/8b4b8c9e21ea424b9c15b0166b369ef1bedc743c))
+
+## [0.3.3](https://github.com/nullplatform/services-valkey/compare/v0.3.2...v0.3.3) (2026-10-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency opentofu/opentofu to v1.13.1 ([#29](https://github.com/nullplatform/services-valkey/issues/29)) ([9642bf0](https://github.com/nullplatform/services-valkey/commit/9642bf0d168db4aa5cfcebf3be696f02a7ef2281))
+
 ## [0.3.2](https://github.com/nullplatform/services-valkey/compare/v0.3.1...v0.3.2) (2026-10-02)
 
 
