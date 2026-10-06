@@ -12,7 +12,7 @@ setup() {
 	run bash -c "{ source '$BENCH'; timed 'sleepy step' bash -c 'sleep 0.2; echo payload; exit 3'; } 2>'$BATS_TEST_TMPDIR/stderr'"
 	[ "$status" -eq 3 ]
 	assert_equal "$output" "payload"
-	[[ "$(cat "$BATS_TEST_TMPDIR/stderr")" =~ \[benchmark\]\ [0-9:]{8}\ sleepy\ step:\ ([0-9]+)ms\ \(since\ start:\ [0-9]+ms\) ]]
+	[[ "$(cat "$BATS_TEST_TMPDIR/stderr")" =~ \[benchmark\]\ [0-9:]{8}\ sleepy\ step:\ ([0-9]+)ms\ \(since\ start:\ [0-9]+ms,\ clock=[a-z-]+\) ]]
 	[ "${BASH_REMATCH[1]}" -ge 150 ]
 }
 
@@ -29,4 +29,20 @@ setup() {
 	run bash -c "source '$BENCH'; bench_log 'step' \"\$(bench_now)\" 2>&1"
 	[[ "$output" =~ since\ start:\ ([0-9]+)ms ]]
 	[ "${BASH_REMATCH[1]}" -gt 1000000 ]
+}
+
+@test "does not mistake a busybox date that ignores nanoseconds for a millisecond clock" {
+	mkdir -p "$BATS_TEST_TMPDIR/busybox"
+	cat >"$BATS_TEST_TMPDIR/busybox/date" <<'MOCK'
+#!/bin/bash
+case "$*" in
+	*%N*) /bin/date -u +%s ;;
+	*) /bin/date "$@" ;;
+esac
+MOCK
+	chmod +x "$BATS_TEST_TMPDIR/busybox/date"
+	export VALKEY_BENCHMARK=true
+	run env PATH="$BATS_TEST_TMPDIR/busybox:$PATH" bash -c "unset EPOCHREALTIME; source '$BENCH'; now=\$(bench_now); echo \"\$now\""
+	[ "$status" -eq 0 ]
+	[ "${#output}" -eq 13 ]
 }
