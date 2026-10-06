@@ -1,11 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+source "$SERVICE_PATH/utils/bench"
+
 if [ "$NOTIFICATION_ACTION" = "metric:list" ]; then
   exec "$SERVICE_PATH/scripts/aws/list_metrics"
 fi
 
 export ASSUME_ROLE_QUIET=true
+ASSUME_ROLE_STARTED=$(bench_now)
 source "$SERVICE_PATH/utils/assume_role_step"
+bench_log "metric: assume role step (provider lookup + sts)" "$ASSUME_ROLE_STARTED"
 
 exec "$SERVICE_PATH/scripts/aws/fetch_metric"

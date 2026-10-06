@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../utils/bench"
+ENTRYPOINT_STARTED=$(bench_now)
+
 if [ -z "${NP_ACTION_CONTEXT:-}" ]; then
   echo "NP_ACTION_CONTEXT is not set. Exiting."
   exit 1
@@ -10,6 +13,7 @@ if [ -n "${NP_API_KEY:-}" ] && [ -z "${NULLPLATFORM_API_KEY:-}" ]; then
   export NULLPLATFORM_API_KEY="$NP_API_KEY"
 fi
 
+PARSE_STARTED=$(bench_now)
 CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
 export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
 
@@ -26,6 +30,7 @@ IS_LINK_ACTION=$(echo "$CONTEXT" | jq '.link != null')
 if [ "$IS_LINK_ACTION" = "true" ]; then
   ACTION_SOURCE="link"
 fi
+bench_log "entrypoint: parse notification context (${#CLEAN_CONTEXT} bytes, action=${NOTIFICATION_ACTION})" "$PARSE_STARTED"
 
 WORKING_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export WORKING_DIRECTORY
@@ -66,6 +71,8 @@ OVERRIDES_PATH="${OVERRIDES_PATH:-$SERVICE_PATH/overrides}"
 export SERVICE_PATH
 export OVERRIDES_PATH
 export ACTION_SOURCE
+
+bench_log "entrypoint: total before routing" "$ENTRYPOINT_STARTED"
 
 if [[ "$NOTIFICATION_ACTION" =~ ^metric: ]]; then
   exec "$WORKING_DIRECTORY/metric"

@@ -88,3 +88,28 @@ run_metric() {
 	assert_equal "$output" '{"results":[]}'
 	assert_not_contains "$(cat "$MOCK_LOG")" "service-action exec"
 }
+
+@test "reports on stderr how long every slow step took without touching the response" {
+	export VALKEY_BENCHMARK=true
+	CONTEXT=$(echo "$CONTEXT" | jq '.arguments.metric = "BilledDataStorage"')
+	run_metric "metric:data"
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$captured_stdout" | jq -r '.metric')" "BilledDataStorage"
+	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
+	for step in "assume role: np provider list identity-access-control" "metric: assume role step" "fetch_metric: parse request" "fetch_metric: aws cloudwatch get-metric-statistics BytesUsedForCache" "fetch_metric: aws elasticache describe-serverless-caches" "fetch_metric: all aws calls done" "fetch_metric: build result" "fetch_metric: total"; do
+		assert_contains "$captured_stderr" "[benchmark]"
+		assert_contains "$captured_stderr" "$step"
+	done
+}
+
+@test "reports the entrypoint parsing time before routing a metric request" {
+	export VALKEY_BENCHMARK=true
+	export NP_ACTION_CONTEXT
+	NP_ACTION_CONTEXT=$(jq -nc '{notification: {action: "metric:list", arguments: {}}}')
+	run bash -c "bash '$SERVICE_PATH/entrypoint/entrypoint' --service-path='$SERVICE_PATH' 2>'$BATS_TEST_TMPDIR/stderr'"
+	[ "$status" -eq 0 ]
+	assert_equal "$(echo "$output" | jq '.results | length')" "8"
+	assert_contains "$(cat "$BATS_TEST_TMPDIR/stderr")" "entrypoint: parse notification context"
+	assert_contains "$(cat "$BATS_TEST_TMPDIR/stderr")" "entrypoint: total before routing"
+	assert_contains "$(cat "$BATS_TEST_TMPDIR/stderr")" "list_metrics: build result"
+}

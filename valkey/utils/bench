@@ -1,0 +1,42 @@
+#!/bin/bash
+
+exec 9>&2
+
+if ! type -t bench_now >/dev/null 2>&1; then
+  bench_now() {
+    local nanoseconds
+    nanoseconds=$(date +%s%N 2>/dev/null)
+    if [[ "$nanoseconds" =~ ^[0-9]+$ ]]; then
+      echo $((nanoseconds / 1000000))
+      return 0
+    fi
+    perl -MTime::HiRes=time -e 'printf "%d", time * 1000' 2>/dev/null || echo $(($(date +%s) * 1000))
+  }
+fi
+
+if [ -z "${BENCH_START_MS:-}" ]; then
+  BENCH_START_MS=$(bench_now)
+  export BENCH_START_MS
+fi
+
+bench_log() {
+  local label="$1" started="$2" now
+  if [ "${VALKEY_BENCHMARK-true}" != "true" ]; then
+    return 0
+  fi
+  now=$(bench_now)
+  echo "[benchmark] $(date -u +%H:%M:%S) ${label}: $((now - started))ms (since start: $((now - BENCH_START_MS))ms)" >&9
+}
+
+timed() {
+  local label="$1" started status
+  shift
+  started=$(bench_now)
+  if "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  bench_log "$label" "$started"
+  return "$status"
+}

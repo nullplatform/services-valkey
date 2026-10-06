@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bench"
+
 _ar_info() {
   if [ "${ASSUME_ROLE_QUIET:-}" != "true" ]; then
     echo "$1" >&2
@@ -10,7 +12,7 @@ if [ -n "${VALKEY_ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   _ar_info "   🔑 Assuming role: $VALKEY_ASSUME_ROLE_ARN_RESOLVED"
 
   _ar_sts_error=$(mktemp)
-  if ! ASSUMED_CREDS=$(aws sts assume-role \
+  if ! ASSUMED_CREDS=$(timed "assume role: sts assume-role" aws sts assume-role \
     --role-arn "$VALKEY_ASSUME_ROLE_ARN_RESOLVED" \
     --role-session-name "np-valkey-${SERVICE_ID:-workflow}" \
     --output json 2>"$_ar_sts_error"); then

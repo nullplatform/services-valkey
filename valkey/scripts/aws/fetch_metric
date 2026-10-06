@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../utils/bench"
+FETCH_STARTED=$(bench_now)
+
 EMPTY_CACHE_ECPU_PER_SECOND=30000
 MINIMUM_METERED_STORAGE_BYTES=104857600
 
@@ -79,6 +82,7 @@ REGION=$(echo "$SERVICE_ATTRS" | jq -r '.valkey_arn // "" | split(":") | .[3] //
 
 if [ -z "$CACHE_NAME" ] || [ -z "$REGION" ]; then
   RESULT=$(empty_series "$METRIC" "$UNIT" "$PERIOD")
+  bench_log "fetch_metric: total (no cache yet, empty series)" "$FETCH_STARTED"
   echo "$RESULT"
   exit 0
 fi
@@ -93,10 +97,14 @@ if [ -n "$AWS_PROFILE_VAL" ]; then
   export AWS_PROFILE="$AWS_PROFILE_VAL"
 fi
 
+bench_log "fetch_metric: parse request (metric=${METRIC}, period=${PERIOD}s, ${START_TIME} to ${END_TIME})" "$FETCH_STARTED"
+
 WORK_DIR=$(mktemp -d)
 trap 'rm -f "$WORK_DIR"/*; rmdir "$WORK_DIR"' EXIT
 
-aws cloudwatch get-metric-statistics \
+AWS_STARTED=$(bench_now)
+
+timed "fetch_metric: aws cloudwatch get-metric-statistics ${SOURCE_METRIC}" aws cloudwatch get-metric-statistics \
   --region "$REGION" \
   --namespace AWS/ElastiCache \
   --metric-name "$SOURCE_METRIC" \
@@ -110,7 +118,7 @@ METRIC_PID=$!
 
 LIMITS_PID=""
 if [ "$KIND" != "raw" ]; then
-  cache_usage_limits >"$WORK_DIR/limits.json" 2>"$WORK_DIR/limits.err" &
+  timed "fetch_metric: aws elasticache describe-serverless-caches" cache_usage_limits >"$WORK_DIR/limits.json" 2>"$WORK_DIR/limits.err" &
   LIMITS_PID=$!
 fi
 
@@ -130,7 +138,9 @@ if [ -n "$LIMITS_PID" ]; then
   fi
   LIMITS=$(cat "$WORK_DIR/limits.json")
 fi
+bench_log "fetch_metric: all aws calls done" "$AWS_STARTED"
 
+BUILD_STARTED=$(bench_now)
 RESULT=$(echo "$RESPONSE" | jq -c \
   --arg metric "$METRIC" \
   --arg unit "$UNIT" \
@@ -168,5 +178,7 @@ RESULT=$(echo "$RESPONSE" | jq -c \
       )
     }]
   }')
+bench_log "fetch_metric: build result (${#RESULT} bytes)" "$BUILD_STARTED"
+bench_log "fetch_metric: total" "$FETCH_STARTED"
 
 echo "$RESULT"
