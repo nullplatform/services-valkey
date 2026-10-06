@@ -16,7 +16,7 @@ module "service_definition" {
 }
 
 module "agent_association" {
-  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=b70e69a99366dea5dedc0e7bd1b9960954f39b8a"
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=v8.3.1"
 
   nrn                          = var.nrn
   api_key                      = var.api_key
