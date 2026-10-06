@@ -10,6 +10,10 @@ locals {
 
   agent_role_arn = var.agent_role_arn != "" ? var.agent_role_arn : "arn:aws:iam::${local.account_id}:role/nullplatform-${var.cluster_name}-agent-role"
 
+  agent_role_names = toset([for arn in concat([local.agent_role_arn], var.additional_agent_role_arns) : regex("[^/]+$", arn)])
+
+  attach_metrics_policy = local.iam_create && var.attach_metrics_policy_to_agent_roles
+
   managed_elasticache_arns = [
     "arn:aws:elasticache:*:${local.account_id}:serverlesscache:${var.cache_name_prefix}*",
     "arn:aws:elasticache:*:${local.account_id}:usergroup:${var.cache_name_prefix}*",

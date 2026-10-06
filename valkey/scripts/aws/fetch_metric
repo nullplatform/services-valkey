@@ -1,0 +1,140 @@
+#!/bin/bash
+set -euo pipefail
+
+EMPTY_CACHE_ECPU_PER_SECOND=30000
+MINIMUM_METERED_STORAGE_BYTES=104857600
+
+metric_config() {
+  case "$1" in
+  ElastiCacheProcessingUnits) UNIT=count STATISTIC=Sum SOURCE_METRIC=ElastiCacheProcessingUnits KIND=raw ;;
+  BytesUsedForCache) UNIT=bytes STATISTIC=Maximum SOURCE_METRIC=BytesUsedForCache KIND=raw ;;
+  CacheHitRate) UNIT=percent STATISTIC=Average SOURCE_METRIC=CacheHitRate KIND=raw ;;
+  CurrConnections) UNIT=count STATISTIC=Maximum SOURCE_METRIC=CurrConnections KIND=raw ;;
+  SuccessfulReadRequestLatency) UNIT=microseconds STATISTIC=Average SOURCE_METRIC=SuccessfulReadRequestLatency KIND=raw ;;
+  ThrottledCmds) UNIT=count STATISTIC=Sum SOURCE_METRIC=ThrottledCmds KIND=raw ;;
+  AvailableECPUPerSecond) UNIT=count STATISTIC=Sum SOURCE_METRIC=ElastiCacheProcessingUnits KIND=available_ecpu ;;
+  BilledDataStorage) UNIT=bytes STATISTIC=Maximum SOURCE_METRIC=BytesUsedForCache KIND=billed_storage ;;
+  *) return 1 ;;
+  esac
+}
+
+iso_seconds_ago() {
+  local seconds="$1" epoch
+  epoch=$(($(date -u +%s) - seconds))
+  date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ
+}
+
+require_timestamp() {
+  local name="$1" value="$2"
+  if [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|\+00:00)$ ]]; then
+    echo "ERROR: ${name} '${value}' is not a UTC ISO 8601 timestamp." >&2
+    exit 1
+  fi
+}
+
+aws_profile_from_values() {
+  local line
+  if [ ! -r "${VALUES:-}" ]; then
+    return 0
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^aws_profile:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$ ]]; then
+      echo "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  done <"$VALUES"
+}
+
+eval "$(printf '%s' "$CONTEXT" | jq -r '
+  (.arguments // {}) as $arguments
+  | ($arguments.service.attributes // {}) as $attributes
+  | @sh "METRIC=\($arguments.metric // "" | tostring)
+START_TIME=\($arguments.start_time // "" | tostring)
+END_TIME=\($arguments.end_time // "" | tostring)
+REQUESTED_PERIOD=\($arguments.period // "" | tostring)
+CACHE_NAME=\($attributes.cache_name // "" | tostring)
+REGION=\($attributes.valkey_arn // "" | tostring | split(":") | .[3] // "")"')"
+
+if ! metric_config "$METRIC"; then
+  echo "ERROR: unknown metric '${METRIC}'." >&2
+  exit 1
+fi
+
+PERIOD=60
+if [[ "$REQUESTED_PERIOD" =~ ^[0-9]+$ ]] && [ "$REQUESTED_PERIOD" -gt 60 ]; then
+  PERIOD=$(((REQUESTED_PERIOD + 59) / 60 * 60))
+fi
+
+if [ -z "$START_TIME" ] || [ -z "$END_TIME" ]; then
+  START_TIME=$(iso_seconds_ago 3600)
+  END_TIME=$(iso_seconds_ago 0)
+fi
+require_timestamp start_time "$START_TIME"
+require_timestamp end_time "$END_TIME"
+
+if [ -z "$CACHE_NAME" ] || [ -z "$REGION" ]; then
+  RESULT=$(printf '{"metric":"%s","type":"gauge","period_in_seconds":%s,"unit":"%s","results":[]}' "$METRIC" "$PERIOD" "$UNIT")
+  echo "$RESULT"
+  exit 0
+fi
+
+if [[ ! "$REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+  echo "ERROR: '${REGION}' from the cache ARN is not an AWS region." >&2
+  exit 1
+fi
+
+AWS_PROFILE_VAL=$(aws_profile_from_values)
+if [ -n "$AWS_PROFILE_VAL" ]; then
+  export AWS_PROFILE="$AWS_PROFILE_VAL"
+fi
+
+if ! RESPONSE=$(aws cloudwatch get-metric-statistics \
+  --region "$REGION" \
+  --namespace AWS/ElastiCache \
+  --metric-name "$SOURCE_METRIC" \
+  --dimensions "Name=clusterId,Value=${CACHE_NAME}" \
+  --start-time "$START_TIME" \
+  --end-time "$END_TIME" \
+  --period "$PERIOD" \
+  --statistics "$STATISTIC" \
+  --output json); then
+  echo "ERROR: CloudWatch rejected the ${SOURCE_METRIC} query for ${CACHE_NAME} in ${REGION}." >&2
+  exit 1
+fi
+
+RESULT=$(printf '%s' "$RESPONSE" | jq -c \
+  --arg metric "$METRIC" \
+  --arg unit "$UNIT" \
+  --arg statistic "$STATISTIC" \
+  --arg kind "$KIND" \
+  --arg cache_name "$CACHE_NAME" \
+  --arg start_time "$START_TIME" \
+  --arg end_time "$END_TIME" \
+  --argjson period "$PERIOD" \
+  --argjson ecpu_capacity "$EMPTY_CACHE_ECPU_PER_SECOND" \
+  --argjson minimum_metered_bytes "$MINIMUM_METERED_STORAGE_BYTES" \
+  '
+  def epoch: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
+  def bucket: (. / $period | floor) * $period;
+  def points: [(.Datapoints // [])[] | {epoch: (.Timestamp | epoch | bucket), value: .[$statistic]}];
+  def series(derive):
+    (points | map({key: (.epoch | tostring), value: .value}) | from_entries) as $used
+    | [range($start_time | epoch | bucket; $end_time | epoch; $period)
+       | {timestamp: todate, value: (($used[tostring] // 0) | derive)}];
+  {
+    metric: $metric,
+    type: "gauge",
+    period_in_seconds: $period,
+    unit: $unit,
+    results: [{
+      selector: {cache_name: $cache_name},
+      data: (
+        if $kind == "available_ecpu" then series([$ecpu_capacity - (. / $period), 0] | max)
+        elif $kind == "billed_storage" then series([., $minimum_metered_bytes] | max)
+        else [(.Datapoints // [])[] | {timestamp: .Timestamp, value: .[$statistic]}] | sort_by(.timestamp)
+        end
+      )
+    }]
+  }')
+
+echo "$RESULT"

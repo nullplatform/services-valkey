@@ -16,7 +16,7 @@ module "service_definition" {
 }
 
 module "agent_association" {
-  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=358757445b819d90a37bf350a603745786982083"
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=b70e69a99366dea5dedc0e7bd1b9960954f39b8a"
 
   nrn                          = var.nrn
   api_key                      = var.api_key
@@ -25,4 +25,5 @@ module "agent_association" {
   repository_service_spec_repo = var.repository_name
   service_path                 = var.service_path
   description                  = var.channel_description
+  channel_sources              = ["service", "telemetry"]
 }
