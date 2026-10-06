@@ -9,6 +9,13 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.4.0](https://github.com/nullplatform/services-valkey/compare/v0.3.5...v0.4.0) (2026-10-06)
+
+
+### Features
+
+* cloudwatch metrics for the valkey cache ([#31](https://github.com/nullplatform/services-valkey/issues/31)) ([beed338](https://github.com/nullplatform/services-valkey/commit/beed338c01fd0442217d1505cd133e9bc4b0fcef))
+
 ## [0.3.5](https://github.com/nullplatform/services-valkey/compare/v0.3.4...v0.3.5) (2026-10-02)
 
 
