@@ -64,7 +64,7 @@ resource "aws_elasticache_serverless_cache" "cache" {
   engine               = "valkey"
   name                 = var.cache_name
   description          = "${var.cache_name} Valkey serverless cache"
-  major_engine_version = "8"
+  major_engine_version = "9"
   user_group_id        = aws_elasticache_user_group.cache.user_group_id
   kms_key_id           = var.kms_key_arn != null ? var.kms_key_arn : aws_kms_key.cache[0].arn
   security_group_ids   = [aws_security_group.cache.id]

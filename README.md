@@ -8,7 +8,7 @@ Creates a serverless Valkey cache per service instance, reachable only from insi
 
 | Capability | Notes |
 | :---- | :---- |
-| Engine | Valkey 8, serverless: no node sizing, scales with usage |
+| Engine | Valkey 9, serverless: no node sizing, scales with usage |
 | Network | Placed in the VPC and subnets of the `vpc` provider; port 6379 open to the VPC CIDR only; the agent role can only touch security groups tagged `managed-by=nullplatform` |
 | Authentication | RBAC user group per cache; one user per link |
 | Encryption | At rest with a dedicated KMS key per cache, or a shared key given to the agent; in transit always |
