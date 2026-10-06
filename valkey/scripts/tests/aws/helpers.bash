@@ -27,6 +27,11 @@ setup_mocks() {
 	export MOCK_CW_RESPONSE
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
+	export MOCK_CACHE_STATUSES="${MOCK_CACHE_STATUSES-gone}"
+	if [ -z "${MOCK_CACHE_TAGS+set}" ]; then
+		MOCK_CACHE_TAGS='{"TagList":[{"Key":"managed-by","Value":"nullplatform"},{"Key":"service-id","Value":"0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"}]}'
+	fi
+	export MOCK_CACHE_TAGS
 	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH
 	export VALKEY_S3_STATE_BUCKET="${VALKEY_S3_STATE_BUCKET-np-valkey-state}"
 
@@ -71,6 +76,32 @@ case "$*" in
 		for arg in "$@"; do
 			case "$arg" in file://*) [ -f "${arg#file://}" ] || { echo "missing delete file" >&2; exit 1; } ;; esac
 		done ;;
+	*"elasticache describe-serverless-caches"*)
+		calls=$(grep -c "elasticache describe-serverless-caches" "$MOCK_LOG")
+		read -ra statuses <<<"$MOCK_CACHE_STATUSES"
+		index=$((calls - 1))
+		[ "$index" -lt "${#statuses[@]}" ] || index=$((${#statuses[@]} - 1))
+		case "${statuses[$index]}" in
+		gone)
+			echo "An error occurred (ServerlessCacheNotFoundFault) when calling the DescribeServerlessCaches operation: Serverless cache not found" >&2
+			exit 254 ;;
+		denied)
+			echo "An error occurred (AccessDenied) when calling the DescribeServerlessCaches operation: not authorized" >&2
+			exit 254 ;;
+		*)
+			jq -n --arg status "${statuses[$index]}" \
+				'{ServerlessCaches: [{ServerlessCacheName: "np-my-cache-0f3a6", ARN: "arn:aws:elasticache:us-west-2:222222222222:serverlesscache:np-my-cache-0f3a6", Status: $status}]}' ;;
+		esac ;;
+	*"elasticache list-tags-for-resource"*) echo "$MOCK_CACHE_TAGS" ;;
+	*"elasticache delete-serverless-cache"*)
+		last=$(grep -c "elasticache describe-serverless-caches" "$MOCK_LOG")
+		read -ra statuses <<<"$MOCK_CACHE_STATUSES"
+		current="${statuses[$((last - 1))]:-}"
+		case "$current" in
+		creating | modifying | deleting)
+			echo "An error occurred (InvalidServerlessCacheStateFault) when calling the DeleteServerlessCache operation: cache is ${current}" >&2
+			exit 254 ;;
+		esac ;;
 esac
 exit 0
 MOCK

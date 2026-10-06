@@ -79,6 +79,11 @@ if ! tofu init -reconfigure $TOFU_INIT_VARIABLES; then
   exit 1
 fi
 
-echo "Running: tofu $TOFU_ACTION"
+TOFU_ACTION_FLAGS=""
+if [ "$TOFU_ACTION" = "destroy" ]; then
+  TOFU_ACTION_FLAGS="-refresh=false"
+fi
+
+echo "Running: tofu $TOFU_ACTION $TOFU_ACTION_FLAGS"
 # shellcheck disable=SC2086
-tofu "$TOFU_ACTION" -auto-approve $TOFU_VARIABLES
+tofu "$TOFU_ACTION" -auto-approve $TOFU_ACTION_FLAGS $TOFU_VARIABLES

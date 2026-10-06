@@ -1,0 +1,112 @@
+#!/bin/bash
+set -euo pipefail
+
+for required in OUTPUT_DIR REGION CACHE_NAME; do
+  if [ -z "${!required:-}" ]; then
+    echo "ERROR: ${required} is not set. build_context must run before this script." >&2
+    exit 1
+  fi
+done
+
+POLL_SECONDS="${POLL_SECONDS:-15}"
+MAX_POLLS="${MAX_POLLS:-120}"
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id // ""')
+if [ -z "$SERVICE_ID" ]; then
+  echo "ERROR: the context carries no service id to match the cache owner against." >&2
+  exit 1
+fi
+STATE_FILE="$OUTPUT_DIR/previous-state.json"
+CACHE_FILE="$OUTPUT_DIR/untracked-cache.json"
+
+cache_in_state() {
+  [ -f "$STATE_FILE" ] || return 1
+  jq -e '[.resources[]? | select(.mode == "managed" and .type == "aws_elasticache_serverless_cache" and .name == "cache")] | length > 0' "$STATE_FILE" >/dev/null
+}
+
+lookup_cache() {
+  local failure
+
+  if ! failure=$(aws elasticache describe-serverless-caches --serverless-cache-name "$CACHE_NAME" --region "$REGION" --output json 2>&1 >"$CACHE_FILE"); then
+    case "$failure" in
+    *ServerlessCacheNotFoundFault*) return 2 ;;
+    esac
+    echo "$failure" | sed '/^[[:space:]]*$/d' >&2
+    return 1
+  fi
+}
+
+cache_owner() {
+  aws elasticache list-tags-for-resource --resource-name "$1" --region "$REGION" --output json |
+    jq -r '[(.TagList // [])[] | select(.Key == "service-id") | .Value][0] // ""'
+}
+
+delete_untracked_cache() {
+  local lookup_status=0 cache_arn owner cache_status delete_requested="" poll
+
+  if cache_in_state; then
+    echo "The tofu state tracks the cache ${CACHE_NAME}; tofu deletes it."
+    return 0
+  fi
+
+  lookup_cache || lookup_status=$?
+
+  if [ "$lookup_status" -eq 2 ]; then
+    echo "No cache ${CACHE_NAME} exists outside the tofu state."
+    return 0
+  fi
+
+  if [ "$lookup_status" -eq 1 ]; then
+    echo "ERROR: could not check whether the cache ${CACHE_NAME} exists outside the tofu state." >&2
+    exit 1
+  fi
+
+  cache_arn=$(jq -r '.ServerlessCaches[0].ARN // ""' "$CACHE_FILE")
+  owner=$(cache_owner "$cache_arn")
+
+  if [ "$owner" != "$SERVICE_ID" ]; then
+    echo "WARNING: the cache ${CACHE_NAME} is not tagged with service-id ${SERVICE_ID} (found '${owner}'); leaving it untouched." >&2
+    return 0
+  fi
+
+  echo "The cache ${CACHE_NAME} exists but the tofu state does not track it, most likely because its creation failed."
+
+  for ((poll = 1; poll <= MAX_POLLS; poll++)); do
+    cache_status=$(jq -r '.ServerlessCaches[0].Status // ""' "$CACHE_FILE")
+
+    case "$cache_status" in
+    creating | modifying)
+      echo "Waiting for the cache to leave the ${cache_status} status before deleting it..."
+      ;;
+    *)
+      if [ "$cache_status" = "deleting" ] || [ -n "$delete_requested" ]; then
+        echo "Waiting for the cache to be deleted..."
+      else
+        echo "Deleting the cache ${CACHE_NAME} (status: ${cache_status})"
+        aws elasticache delete-serverless-cache --serverless-cache-name "$CACHE_NAME" --region "$REGION" >/dev/null
+        delete_requested=1
+      fi
+      ;;
+    esac
+
+    sleep "$POLL_SECONDS"
+
+    lookup_status=0
+    lookup_cache || lookup_status=$?
+
+    if [ "$lookup_status" -eq 2 ]; then
+      echo "Cache ${CACHE_NAME} deleted."
+      return 0
+    fi
+
+    if [ "$lookup_status" -eq 1 ]; then
+      echo "ERROR: could not check the deletion of the cache ${CACHE_NAME}." >&2
+      exit 1
+    fi
+  done
+
+  echo "ERROR: the cache ${CACHE_NAME} still exists after $((POLL_SECONDS * MAX_POLLS)) seconds; retry the delete." >&2
+  exit 1
+}
+
+delete_untracked_cache

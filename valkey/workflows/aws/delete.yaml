@@ -28,6 +28,12 @@ steps:
         type: environment
       - name: TOFU_VARIABLES
         type: environment
+      - name: CACHE_NAME
+        type: environment
+
+  - name: delete cache outside the state
+    type: script
+    file: $SERVICE_PATH/scripts/aws/delete_untracked_cache
 
   - name: tofu
     type: script

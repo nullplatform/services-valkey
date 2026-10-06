@@ -76,8 +76,22 @@ require_network_ids() {
   done
 }
 
+cache_name_from_state() {
+  jq -r '[.resources[]? | select(.mode == "managed" and .type == "aws_elasticache_user_group" and .name == "cache")][0].instances[0].attributes.user_group_id // "" | sub("-ug$"; "")' "$1"
+}
+
 resolve_cache_name() {
-  local existing
+  local state_file="$1" from_state existing
+
+  if [ -n "$state_file" ]; then
+    from_state=$(cache_name_from_state "$state_file")
+    if [ -n "$from_state" ]; then
+      echo "Using cache_name from the tofu state: ${from_state}" >&2
+      echo "$from_state"
+      return 0
+    fi
+  fi
+
   existing=$(echo "$CONTEXT" | jq -r '.service.attributes.cache_name // ""')
   if [ -n "$existing" ]; then
     echo "Using existing cache_name from service attributes: ${existing}" >&2
@@ -149,9 +163,7 @@ require_state_bucket() {
 
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
 SERVICE_LABEL=$(echo "$CONTEXT" | jq -r '.service.slug // .service.name // ""')
-
-CACHE_NAME=$(resolve_cache_name)
-export SERVICE_ID CACHE_NAME
+export SERVICE_ID
 
 AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
 if [ -n "$AWS_PROFILE_VAL" ]; then
@@ -202,9 +214,11 @@ echo "Using state prefix: ${TFSTATE_KEY_PREFIX}"
 
 export OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 mkdir -p "$OUTPUT_DIR"
+STATE_FILE="$OUTPUT_DIR/previous-state.json"
+rm -f "$STATE_FILE"
 
 STATE_STATUS=0
-STATE_KMS_KEY=$(kms_key_from_state "$TFSTATE_BUCKET" "${TFSTATE_KEY_PREFIX}terraform.tfstate" "$REGION" "$OUTPUT_DIR/previous-state.json") || STATE_STATUS=$?
+STATE_KMS_KEY=$(kms_key_from_state "$TFSTATE_BUCKET" "${TFSTATE_KEY_PREFIX}terraform.tfstate" "$REGION" "$STATE_FILE") || STATE_STATUS=$?
 
 if [ "$STATE_STATUS" -eq 1 ]; then
   echo "ERROR: could not read the tofu state at s3://${TFSTATE_BUCKET}/${TFSTATE_KEY_PREFIX}terraform.tfstate to find the cache's KMS key." >&2
@@ -212,9 +226,13 @@ if [ "$STATE_STATUS" -eq 1 ]; then
 fi
 
 if [ "$STATE_STATUS" -eq 0 ]; then
-  keep_network_from_state "$OUTPUT_DIR/previous-state.json"
+  keep_network_from_state "$STATE_FILE"
   require_network_ids "the tofu state"
+  CACHE_NAME=$(resolve_cache_name "$STATE_FILE")
+else
+  CACHE_NAME=$(resolve_cache_name "")
 fi
+export CACHE_NAME
 
 echo "Using region: ${REGION}"
 echo "Using VPC: ${VPC_ID}"
