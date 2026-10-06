@@ -109,7 +109,7 @@ Each link user is named `np-<link slug>-<first 5 characters of the link id>-user
 
 ## Metrics
 
-`metric:list` and `metric:data` notifications run `workflows/aws/metric-list.yaml` and `workflows/aws/metric.yaml`. The data workflow reads `AWS/ElastiCache` with the dimension `clusterId = cache_name`, in the region of the cache ARN, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
+`metric:list` and `metric:data` notifications run `scripts/aws/list_metrics` and `scripts/aws/fetch_metric` directly from `entrypoint/metric`, without `np service workflow exec`. `metric:data` first assumes the permissions role, silently, and then reads `AWS/ElastiCache` with the dimension `clusterId = cache_name`, in the region of the cache ARN, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
 
 | Metric | Statistic | Unit |
 | :---- | :---- | :---- |
@@ -126,7 +126,7 @@ The ECPU/s ceiling is the cache's configured maximum, or 30,000 when none is set
 
 A service whose cache does not exist yet returns an empty series. A CloudWatch error fails the request instead of showing an empty graph.
 
-The service has no logs: `log:*` notifications run `workflows/aws/log.yaml`, which answers with no entries. Telemetry workflows run with `--no-output` and print nothing but their result, since stdout is the response.
+The service has no logs: `log:*` notifications run `scripts/aws/read_logs`, which answers with no entries. Telemetry scripts print nothing but their result, since stdout is the response. Workflow overrides do not apply to telemetry.
 
 ## Connecting
 

@@ -25,6 +25,11 @@ setup_mocks() {
 		MOCK_CW_RESPONSE='{"Label":"x","Datapoints":[]}'
 	fi
 	export MOCK_EC_EXIT="${MOCK_EC_EXIT:-0}"
+	export MOCK_STS_EXIT="${MOCK_STS_EXIT:-0}"
+	if [ -z "${MOCK_NP_IAM_PROVIDERS+set}" ]; then
+		MOCK_NP_IAM_PROVIDERS='{"results":[]}'
+	fi
+	export MOCK_NP_IAM_PROVIDERS
 	if [ -z "${MOCK_EC_CACHES+set}" ]; then
 		MOCK_EC_CACHES='{"ServerlessCaches":[{"ServerlessCacheName":"np-my-cache-0f3a6"}]}'
 	fi
@@ -66,7 +71,14 @@ case "$*" in
 			fi
 			printf '%s' "$MOCK_STATE_JSON" > "$dest" ;;
 		esac ;;
+	"sts assume-role"*)
+		if [ "$MOCK_STS_EXIT" != "0" ]; then
+			echo "An error occurred (AccessDenied) when calling the AssumeRole operation" >&2
+			exit "$MOCK_STS_EXIT"
+		fi
+		echo '{"Credentials":{"AccessKeyId":"ASIAVALKEYROLE","SecretAccessKey":"role-secret","SessionToken":"role-token"}}' ;;
 	"cloudwatch get-metric-statistics"*)
+		echo "cloudwatch credentials: ${AWS_ACCESS_KEY_ID:-agent}" >> "$MOCK_LOG"
 		if [ "$MOCK_CW_EXIT" != "0" ]; then
 			echo "An error occurred (AccessDenied) when calling the GetMetricStatistics operation" >&2
 			exit "$MOCK_CW_EXIT"
@@ -105,6 +117,7 @@ for arg in "$@"; do
 done
 case "$category" in
 	cloud-providers) echo "$MOCK_NP_CLOUD_PROVIDERS" ;;
+	identity-access-control) echo "$MOCK_NP_IAM_PROVIDERS" ;;
 	vpc) echo "$MOCK_NP_VPC_PROVIDERS" ;;
 	*) echo '{"results":[]}' ;;
 esac

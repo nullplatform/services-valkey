@@ -1,4 +1,0 @@
-steps:
-  - name: list metrics
-    type: script
-    file: $SERVICE_PATH/scripts/aws/list_metrics

@@ -1,23 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-WORKFLOW_NAME="metric"
 if [ "$NOTIFICATION_ACTION" = "metric:list" ]; then
-  WORKFLOW_NAME="metric-list"
+  exec "$SERVICE_PATH/scripts/aws/list_metrics"
 fi
 
-WORKFLOW_PATH="$SERVICE_PATH/workflows/aws/$WORKFLOW_NAME.yaml"
-OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/workflows/aws/$WORKFLOW_NAME.yaml"
-VALUES_PATH="$SERVICE_PATH/values.yaml"
+export ASSUME_ROLE_QUIET=true
+source "$SERVICE_PATH/utils/assume_role_step"
 
-CMD=(np service workflow exec --no-output --workflow "$WORKFLOW_PATH")
-
-if [[ -f "$VALUES_PATH" ]]; then
-  CMD+=(--values "$VALUES_PATH")
-fi
-
-if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
-  CMD+=(--overrides "$OVERRIDES_WORKFLOW_PATH")
-fi
-
-"${CMD[@]}"
+exec "$SERVICE_PATH/scripts/aws/fetch_metric"

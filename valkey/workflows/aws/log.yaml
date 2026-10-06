@@ -1,4 +1,0 @@
-steps:
-  - name: read logs
-    type: script
-    file: $SERVICE_PATH/scripts/aws/read_logs

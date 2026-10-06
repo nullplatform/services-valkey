@@ -4,34 +4,71 @@ load helpers
 
 setup() {
 	setup_mocks
-	export OVERRIDES_PATH="$BATS_TEST_TMPDIR/overrides"
+	export CONTEXT
+	CONTEXT=$(metric_context "$(jq -n --argjson service "$(cache_service)" '{
+		metric: "CacheHitRate",
+		start_time: "2026-10-02T10:00:00.000Z",
+		end_time: "2026-10-02T11:00:00.000Z",
+		period: 300,
+		service: $service
+	}')" | jq '.entity_nrn = "organization=1:account=2:namespace=3:application=4"')
 }
 
-run_entrypoint() {
-	run bash "$SERVICE_PATH/entrypoint/metric"
+run_metric() {
+	export NOTIFICATION_ACTION="$1"
+	run bash -c "bash '$SERVICE_PATH/entrypoint/metric' >'$BATS_TEST_TMPDIR/stdout' 2>'$BATS_TEST_TMPDIR/stderr'"
+	captured_stdout=$(cat "$BATS_TEST_TMPDIR/stdout")
+	captured_stderr=$(cat "$BATS_TEST_TMPDIR/stderr")
 }
 
-@test "runs the metric-list workflow without output for metric:list" {
-	export NOTIFICATION_ACTION="metric:list"
-	run_entrypoint
+@test "answers metric:list with the metric list and touches neither np nor aws" {
+	run_metric "metric:list"
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "np service workflow exec --no-output --workflow $SERVICE_PATH/workflows/aws/metric-list.yaml --values $SERVICE_PATH/values.yaml"
+	assert_equal "$(echo "$captured_stdout" | jq '.results | length')" "8"
+	assert_equal "$captured_stderr" ""
+	assert_equal "$(cat "$MOCK_LOG")" ""
 }
 
-@test "runs the metric workflow for metric:data" {
-	export NOTIFICATION_ACTION="metric:data"
-	run_entrypoint
+@test "answers metric:data with only the metric result when no role is published" {
+	run_metric "metric:data"
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "--workflow $SERVICE_PATH/workflows/aws/metric.yaml "
+	assert_equal "$(echo "$captured_stdout" | jq -r '.metric')" "CacheHitRate"
+	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
+	assert_equal "$captured_stderr" ""
+	assert_contains "$(cat "$MOCK_LOG")" "np provider list --nrn organization=1:account=2:namespace=3:application=4 --categories identity-access-control"
+	assert_contains "$(cat "$MOCK_LOG")" "cloudwatch credentials: agent"
 }
 
-@test "adds the override workflow when one exists" {
-	export NOTIFICATION_ACTION="metric:data"
-	mkdir -p "$OVERRIDES_PATH/workflows/aws"
-	: >"$OVERRIDES_PATH/workflows/aws/metric.yaml"
-	run_entrypoint
+@test "queries cloudwatch with the valkey role when the provider publishes one" {
+	export MOCK_NP_IAM_PROVIDERS='{"results":[{"attributes":{"iam_role_arns":{"arns":[{"selector":"valkey","arn":"arn:aws:iam::111122223333:role/valkey"}]}}}]}'
+	run_metric "metric:data"
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "--overrides $OVERRIDES_PATH/workflows/aws/metric.yaml"
+	assert_contains "$(cat "$MOCK_LOG")" "aws sts assume-role --role-arn arn:aws:iam::111122223333:role/valkey"
+	assert_contains "$(cat "$MOCK_LOG")" "cloudwatch credentials: ASIAVALKEYROLE"
+	assert_equal "$captured_stderr" ""
+}
+
+@test "fails without querying cloudwatch when the role cannot be assumed" {
+	export MOCK_NP_IAM_PROVIDERS='{"results":[{"attributes":{"iam_role_arns":{"arns":[{"selector":"valkey","arn":"arn:aws:iam::111122223333:role/valkey"}]}}}]}'
+	export MOCK_STS_EXIT=254
+	run_metric "metric:data"
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "sts:AssumeRole failed"
+	assert_not_contains "$(cat "$MOCK_LOG")" "cloudwatch"
+	assert_equal "$captured_stdout" ""
+}
+
+@test "never goes through np service workflow exec" {
+	run_metric "metric:list"
+	run_metric "metric:data"
+	assert_not_contains "$(cat "$MOCK_LOG")" "workflow exec"
+}
+
+@test "answers log requests with no entries" {
+	run bash "$SERVICE_PATH/entrypoint/log"
+	[ "$status" -eq 0 ]
+	assert_equal "$output" '{"results":[]}'
+	assert_equal "$(cat "$MOCK_LOG")" ""
 }
 
 @test "routes metric notifications away from the service action runner" {
@@ -39,15 +76,8 @@ run_entrypoint() {
 	NP_ACTION_CONTEXT=$(jq -nc '{notification: {action: "metric:list", arguments: {}}}')
 	run bash "$SERVICE_PATH/entrypoint/entrypoint" --service-path="$SERVICE_PATH"
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "--workflow $SERVICE_PATH/workflows/aws/metric-list.yaml"
+	assert_equal "$(echo "$output" | jq '.results | length')" "8"
 	assert_not_contains "$(cat "$MOCK_LOG")" "service-action exec"
-}
-
-@test "runs the log workflow without output for log notifications" {
-	export NOTIFICATION_ACTION="log:read"
-	run bash "$SERVICE_PATH/entrypoint/log"
-	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "np service workflow exec --no-output --workflow $SERVICE_PATH/workflows/aws/log.yaml"
 }
 
 @test "routes log notifications away from the service action runner" {
@@ -55,13 +85,6 @@ run_entrypoint() {
 	NP_ACTION_CONTEXT=$(jq -nc '{notification: {action: "log:read", arguments: {}}}')
 	run bash "$SERVICE_PATH/entrypoint/entrypoint" --service-path="$SERVICE_PATH"
 	[ "$status" -eq 0 ]
-	assert_contains "$(cat "$MOCK_LOG")" "--workflow $SERVICE_PATH/workflows/aws/log.yaml"
+	assert_equal "$output" '{"results":[]}'
 	assert_not_contains "$(cat "$MOCK_LOG")" "service-action exec"
-}
-
-@test "silences the assume role progress in the metric workflow only" {
-	run grep -A3 "file: \$SERVICE_PATH/utils/assume_role_step" "$SERVICE_PATH/workflows/aws/metric.yaml"
-	assert_contains "$output" 'ASSUME_ROLE_QUIET: "true"'
-	run grep -l "ASSUME_ROLE_QUIET" "$SERVICE_PATH"/workflows/aws/create.yaml "$SERVICE_PATH"/workflows/aws/link.yaml
-	[ "$status" -ne 0 ]
 }
