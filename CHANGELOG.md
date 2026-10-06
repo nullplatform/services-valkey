@@ -9,6 +9,14 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.5.0](https://github.com/nullplatform/services-valkey/compare/v0.4.0...v0.5.0) (2026-10-06)
+
+
+### Features
+
+* run the worker image as a non-root user ([41368e5](https://github.com/nullplatform/services-valkey/commit/41368e5a6225fdb0417dce6883d1bbaa7939357e))
+* run the worker image as a non-root user ([7957fa5](https://github.com/nullplatform/services-valkey/commit/7957fa5275ccf6d788b78ef10c9aa4e39d1e36c8))
+
 ## [0.4.0](https://github.com/nullplatform/services-valkey/compare/v0.3.5...v0.4.0) (2026-10-06)
 
 
