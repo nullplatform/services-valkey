@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+
+### Features
+
+* metrics for the cache in the service's metrics view: ECPUs, memory, hit rate, connections, read latency, throttled commands, available ECPUs per second and billed storage
+* the agent role needs `cloudwatch:GetMetricStatistics` to show metrics
+* the install module subscribes the agent channel to `telemetry` notifications
+
 ## [0.3.5](https://github.com/nullplatform/services-valkey/compare/v0.3.4...v0.3.5) (2026-10-02)
 
 
