@@ -99,36 +99,6 @@ fi
 
 bench_log "fetch_metric: parse request (metric=${METRIC}, period=${PERIOD}s, ${START_TIME} to ${END_TIME})" "$FETCH_STARTED"
 
-credentials_source() {
-  if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-    echo "environment keys (assumed role)"
-  elif [ -n "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ]; then
-    echo "web identity (irsa)"
-  elif [ -n "${AWS_CONTAINER_CREDENTIALS_FULL_URI:-}" ]; then
-    echo "container credentials (pod identity)"
-  elif [ -n "${AWS_PROFILE:-}" ]; then
-    echo "profile ${AWS_PROFILE}"
-  else
-    echo "default chain (instance metadata)"
-  fi
-}
-
-cpu_limit() {
-  if [ -r /sys/fs/cgroup/cpu.max ]; then
-    cat /sys/fs/cgroup/cpu.max
-  elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ]; then
-    echo "$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us) $(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null)"
-  else
-    echo "unknown"
-  fi
-}
-
-if [ "${VALKEY_BENCHMARK-true}" = "true" ]; then
-  bench_log "diagnostic: cpus=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo unknown), cgroup cpu limit=$(cpu_limit), load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown), credentials=$(credentials_source), aws=$(command -v aws)" "$(bench_now)"
-  timed "diagnostic: aws --version (cli startup only)" aws --version >/dev/null 2>&1 || true
-  timed "diagnostic: aws sts get-caller-identity (startup + credentials + one request)" aws sts get-caller-identity --region "$REGION" --output json >/dev/null 2>&1 || true
-fi
-
 WORK_DIR=$(mktemp -d)
 trap 'rm -f "$WORK_DIR"/*; rmdir "$WORK_DIR"' EXIT
 

@@ -96,7 +96,7 @@ run_metric() {
 	[ "$status" -eq 0 ]
 	assert_equal "$(echo "$captured_stdout" | jq -r '.metric')" "BilledDataStorage"
 	assert_equal "$(echo "$captured_stdout" | wc -l | tr -d ' ')" "1"
-	for step in "assume role: np provider list identity-access-control" "metric: assume role step" "fetch_metric: parse request" "fetch_metric: aws cloudwatch get-metric-statistics BytesUsedForCache" "fetch_metric: aws elasticache describe-serverless-caches" "fetch_metric: all aws calls done" "fetch_metric: build result" "fetch_metric: total" "diagnostic: cpus=" "diagnostic: aws --version (cli startup only)" "diagnostic: aws sts get-caller-identity (startup + credentials + one request)"; do
+	for step in "assume role: np provider list identity-access-control" "metric: assume role step" "fetch_metric: parse request" "fetch_metric: aws cloudwatch get-metric-statistics BytesUsedForCache" "fetch_metric: aws elasticache describe-serverless-caches" "fetch_metric: all aws calls done" "fetch_metric: build result" "fetch_metric: total"; do
 		assert_contains "$captured_stderr" "[benchmark]"
 		assert_contains "$captured_stderr" "$step"
 	done
@@ -112,36 +112,4 @@ run_metric() {
 	assert_contains "$(cat "$BATS_TEST_TMPDIR/stderr")" "entrypoint: parse notification context"
 	assert_contains "$(cat "$BATS_TEST_TMPDIR/stderr")" "entrypoint: total before routing"
 	assert_contains "$(cat "$BATS_TEST_TMPDIR/stderr")" "list_metrics: build result"
-}
-
-@test "runs the aws diagnostics before the real calls and only while benchmarking" {
-	export VALKEY_BENCHMARK=true
-	run_metric "metric:data"
-	[ "$status" -eq 0 ]
-	assert_equal "$(grep -n "aws --version" "$MOCK_LOG" | cut -d: -f1)" "$(($(grep -n "cloudwatch get-metric-statistics" "$MOCK_LOG" | cut -d: -f1) - 2))"
-	assert_contains "$(cat "$MOCK_LOG")" "aws sts get-caller-identity --region us-west-2"
-
-	: >"$MOCK_LOG"
-	export VALKEY_BENCHMARK=false
-	run_metric "metric:data"
-	[ "$status" -eq 0 ]
-	assert_not_contains "$(cat "$MOCK_LOG")" "aws --version"
-	assert_not_contains "$(cat "$MOCK_LOG")" "get-caller-identity"
-}
-
-@test "keeps answering when a diagnostic call fails" {
-	export VALKEY_BENCHMARK=true
-	mkdir -p "$BATS_TEST_TMPDIR/failing"
-	cat >"$BATS_TEST_TMPDIR/failing/aws" <<MOCK
-#!/bin/bash
-case "\$*" in
-	"--version"|"sts get-caller-identity"*) echo "aws \$*" >>"$MOCK_LOG"; exit 255 ;;
-esac
-exec "$MOCK_BIN/aws" "\$@"
-MOCK
-	chmod +x "$BATS_TEST_TMPDIR/failing/aws"
-	export PATH="$BATS_TEST_TMPDIR/failing:$PATH"
-	run_metric "metric:data"
-	[ "$status" -eq 0 ]
-	assert_equal "$(echo "$captured_stdout" | jq -r '.metric')" "CacheHitRate"
 }
