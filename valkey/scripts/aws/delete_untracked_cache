@@ -41,67 +41,72 @@ cache_owner() {
     jq -r '[(.TagList // [])[] | select(.Key == "service-id") | .Value][0] // ""'
 }
 
-if cache_in_state; then
-  echo "The tofu state tracks the cache ${CACHE_NAME}; tofu deletes it."
-  exit 0
-fi
+delete_untracked_cache() {
+  local lookup_status=0 cache_arn owner cache_status delete_requested="" poll
 
-LOOKUP_STATUS=0
-lookup_cache || LOOKUP_STATUS=$?
-
-if [ "$LOOKUP_STATUS" -eq 2 ]; then
-  echo "No cache ${CACHE_NAME} exists outside the tofu state."
-  exit 0
-fi
-
-if [ "$LOOKUP_STATUS" -eq 1 ]; then
-  echo "ERROR: could not check whether the cache ${CACHE_NAME} exists outside the tofu state." >&2
-  exit 1
-fi
-
-CACHE_ARN=$(jq -r '.ServerlessCaches[0].ARN // ""' "$CACHE_FILE")
-OWNER=$(cache_owner "$CACHE_ARN")
-
-if [ "$OWNER" != "$SERVICE_ID" ]; then
-  echo "WARNING: the cache ${CACHE_NAME} is not tagged with service-id ${SERVICE_ID} (found '${OWNER}'); leaving it untouched." >&2
-  exit 0
-fi
-
-echo "The cache ${CACHE_NAME} exists but the tofu state does not track it, most likely because its creation failed."
-
-for ((poll = 1; poll <= MAX_POLLS; poll++)); do
-  CACHE_STATUS=$(jq -r '.ServerlessCaches[0].Status // ""' "$CACHE_FILE")
-
-  case "$CACHE_STATUS" in
-  creating | modifying)
-    echo "Waiting for the cache to leave the ${CACHE_STATUS} status before deleting it..."
-    ;;
-  *)
-    if [ "$CACHE_STATUS" = "deleting" ] || [ -n "${DELETE_REQUESTED:-}" ]; then
-      echo "Waiting for the cache to be deleted..."
-    else
-      echo "Deleting the cache ${CACHE_NAME} (status: ${CACHE_STATUS})"
-      aws elasticache delete-serverless-cache --serverless-cache-name "$CACHE_NAME" --region "$REGION" >/dev/null
-      DELETE_REQUESTED=1
-    fi
-    ;;
-  esac
-
-  sleep "$POLL_SECONDS"
-
-  LOOKUP_STATUS=0
-  lookup_cache || LOOKUP_STATUS=$?
-
-  if [ "$LOOKUP_STATUS" -eq 2 ]; then
-    echo "Cache ${CACHE_NAME} deleted."
-    exit 0
+  if cache_in_state; then
+    echo "The tofu state tracks the cache ${CACHE_NAME}; tofu deletes it."
+    return 0
   fi
 
-  if [ "$LOOKUP_STATUS" -eq 1 ]; then
-    echo "ERROR: could not check the deletion of the cache ${CACHE_NAME}." >&2
+  lookup_cache || lookup_status=$?
+
+  if [ "$lookup_status" -eq 2 ]; then
+    echo "No cache ${CACHE_NAME} exists outside the tofu state."
+    return 0
+  fi
+
+  if [ "$lookup_status" -eq 1 ]; then
+    echo "ERROR: could not check whether the cache ${CACHE_NAME} exists outside the tofu state." >&2
     exit 1
   fi
-done
 
-echo "ERROR: the cache ${CACHE_NAME} still exists after $((POLL_SECONDS * MAX_POLLS)) seconds; retry the delete." >&2
-exit 1
+  cache_arn=$(jq -r '.ServerlessCaches[0].ARN // ""' "$CACHE_FILE")
+  owner=$(cache_owner "$cache_arn")
+
+  if [ "$owner" != "$SERVICE_ID" ]; then
+    echo "WARNING: the cache ${CACHE_NAME} is not tagged with service-id ${SERVICE_ID} (found '${owner}'); leaving it untouched." >&2
+    return 0
+  fi
+
+  echo "The cache ${CACHE_NAME} exists but the tofu state does not track it, most likely because its creation failed."
+
+  for ((poll = 1; poll <= MAX_POLLS; poll++)); do
+    cache_status=$(jq -r '.ServerlessCaches[0].Status // ""' "$CACHE_FILE")
+
+    case "$cache_status" in
+    creating | modifying)
+      echo "Waiting for the cache to leave the ${cache_status} status before deleting it..."
+      ;;
+    *)
+      if [ "$cache_status" = "deleting" ] || [ -n "$delete_requested" ]; then
+        echo "Waiting for the cache to be deleted..."
+      else
+        echo "Deleting the cache ${CACHE_NAME} (status: ${cache_status})"
+        aws elasticache delete-serverless-cache --serverless-cache-name "$CACHE_NAME" --region "$REGION" >/dev/null
+        delete_requested=1
+      fi
+      ;;
+    esac
+
+    sleep "$POLL_SECONDS"
+
+    lookup_status=0
+    lookup_cache || lookup_status=$?
+
+    if [ "$lookup_status" -eq 2 ]; then
+      echo "Cache ${CACHE_NAME} deleted."
+      return 0
+    fi
+
+    if [ "$lookup_status" -eq 1 ]; then
+      echo "ERROR: could not check the deletion of the cache ${CACHE_NAME}." >&2
+      exit 1
+    fi
+  done
+
+  echo "ERROR: the cache ${CACHE_NAME} still exists after $((POLL_SECONDS * MAX_POLLS)) seconds; retry the delete." >&2
+  exit 1
+}
+
+delete_untracked_cache

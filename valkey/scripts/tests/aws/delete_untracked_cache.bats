@@ -18,6 +18,37 @@ state_with() {
 	jq -n --arg type "$1" '{resources: [{mode: "managed", type: $type, name: "cache", instances: [{attributes: {}}]}]}' > "$OUTPUT_DIR/previous-state.json"
 }
 
+run_as_workflow_step() {
+	run bash -c "source '$SCRIPTS_DIR/delete_untracked_cache'; echo 'next step ran'"
+}
+
+@test "lets the next workflow step run after every successful outcome" {
+	state_with aws_elasticache_serverless_cache
+	run_as_workflow_step
+	[ "$status" -eq 0 ]
+	assert_contains "$output" "next step ran"
+
+	state_with aws_elasticache_user_group
+	run_as_workflow_step
+	[ "$status" -eq 0 ]
+	assert_contains "$output" "next step ran"
+
+	export MOCK_CACHE_STATUSES="available"
+	export MOCK_CACHE_TAGS='{"TagList":[]}'
+	run_as_workflow_step
+	[ "$status" -eq 0 ]
+	assert_contains "$output" "next step ran"
+
+	: > "$MOCK_LOG"
+	export MOCK_CACHE_STATUSES="available deleting gone"
+	unset MOCK_CACHE_TAGS
+	setup_mocks
+	run_as_workflow_step
+	[ "$status" -eq 0 ]
+	assert_contains "$output" "Cache np-my-cache-0f3a6 deleted."
+	assert_contains "$output" "next step ran"
+}
+
 @test "leaves the cache to tofu when the state tracks it" {
 	state_with aws_elasticache_serverless_cache
 	export MOCK_CACHE_STATUSES="available"
