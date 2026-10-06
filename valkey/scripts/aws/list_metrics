@@ -1,9 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../utils/bench"
-STARTED=$(bench_now)
-
 RESULT=$(jq -n -c '{
   results: [
     {name: "ElastiCacheProcessingUnits", title: "Processing units (ECPUs)", unit: "count"},
@@ -16,7 +13,5 @@ RESULT=$(jq -n -c '{
     {name: "BilledDataStorage", title: "Billed data storage", unit: "bytes"}
   ] | map(. + {available_filters: [], available_group_by: []})
 }')
-
-bench_log "list_metrics: build result" "$STARTED"
 
 echo "$RESULT"

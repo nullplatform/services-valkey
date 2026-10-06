@@ -1,11 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../utils/bench"
-STARTED=$(bench_now)
-
 RESULT='{"results":[]}'
-
-bench_log "read_logs: build result" "$STARTED"
 
 echo "$RESULT"
