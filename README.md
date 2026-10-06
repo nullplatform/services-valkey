@@ -68,7 +68,7 @@ To apply it as a root module instead, copy `terraform.tfvars.example` to `terraf
 | Encryption | `kms:DescribeKey`, `CreateGrant` for ElastiCache | Only the keys in `external_kms_key_arns`, when set |
 | State | `s3:ListBucket`, `GetObject`, `PutObject`, `DeleteObject` and their versions | The `state_bucket_name` bucket |
 
-The agent role itself always needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role, so they cost a single AWS call.
+The agent role itself always needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role, so they cost a single AWS call. The module attaches that policy to `agent_role_arn` and `additional_agent_role_arns`; set `attach_metrics_policy_to_agent_roles = false` if the agent role is managed elsewhere.
 
 **2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
 
