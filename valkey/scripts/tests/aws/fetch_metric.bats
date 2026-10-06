@@ -200,3 +200,17 @@ MOCK
 	[ "$status" -eq 0 ]
 	assert_contains "$(cat "$MOCK_LOG")" "profile=sso-valkey"
 }
+
+@test "never runs a command smuggled in a non-string request field" {
+	marker="$BATS_TEST_TMPDIR/pwned"
+	for field in metric start_time end_time period; do
+		CONTEXT=$(echo "$CONTEXT" | jq --arg field "$field" --arg marker "$marker" '.arguments[$field] = ["x", "touch", $marker]')
+		run_script fetch_metric
+		[ ! -e "$marker" ]
+	done
+	for field in cache_name valkey_arn; do
+		CONTEXT=$(echo "$CONTEXT" | jq --arg field "$field" --arg marker "$marker" '.arguments.service.attributes[$field] = ["x", "touch", $marker]')
+		run_script fetch_metric
+		[ ! -e "$marker" ]
+	done
+}

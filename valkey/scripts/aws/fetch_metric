@@ -51,12 +51,12 @@ aws_profile_from_values() {
 eval "$(printf '%s' "$CONTEXT" | jq -r '
   (.arguments // {}) as $arguments
   | ($arguments.service.attributes // {}) as $attributes
-  | @sh "METRIC=\($arguments.metric // "")
-START_TIME=\($arguments.start_time // "")
-END_TIME=\($arguments.end_time // "")
+  | @sh "METRIC=\($arguments.metric // "" | tostring)
+START_TIME=\($arguments.start_time // "" | tostring)
+END_TIME=\($arguments.end_time // "" | tostring)
 REQUESTED_PERIOD=\($arguments.period // "" | tostring)
-CACHE_NAME=\($attributes.cache_name // "")
-REGION=\(($attributes.valkey_arn // "") | split(":") | .[3] // "")"')"
+CACHE_NAME=\($attributes.cache_name // "" | tostring)
+REGION=\($attributes.valkey_arn // "" | tostring | split(":") | .[3] // "")"')"
 
 if ! metric_config "$METRIC"; then
   echo "ERROR: unknown metric '${METRIC}'." >&2
