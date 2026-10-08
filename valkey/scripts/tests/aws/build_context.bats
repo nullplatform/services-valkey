@@ -192,7 +192,7 @@ setup() {
 	assert_equal "$(captured TFSTATE_BUCKET)" "np-valkey-state"
 	assert_equal "$(captured TFSTATE_KEY_PREFIX)" "services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/"
 	assert_equal "$(captured TOFU_INIT_VARIABLES)" "-backend-config=bucket=np-valkey-state -backend-config=key=services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfstate -backend-config=region=us-west-2 -backend-config=use_lockfile=true"
-	assert_equal "$(captured TOFU_VARIABLES)" "-var=service_id=0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -var=region=us-west-2 -var=cache_name=np-my-cache-0f3a6 -var=vpc_id=vpc-0123 -var-file=/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json"
+	assert_equal "$(captured TOFU_VARIABLES)" "-var=service_id=0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718 -var=region=us-west-2 -var=cache_name=np-my-cache-0f3a6 -var=vpc_id=vpc-0123 -var=engine_version=9 -var-file=/tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json"
 }
 
 @test "writes the context tags to the tfvars file keeping only string values" {
@@ -367,4 +367,253 @@ setup() {
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "could not read the tofu state"
 	assert_contains "$captured_stderr" "AccessDenied"
+}
+
+tfvars() {
+	jq -c "$1" /tmp/np-service-0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/terraform.tfvars.json
+}
+
+# Each call starts from a fresh service context, so the cases of one test do not leak into the next.
+with_params() {
+	CONTEXT=$(service_context '{}' "$(full_params)" | jq "$1")
+}
+
+# A tofu state holding an existing cache, as build_context downloads it.
+existing_cache() {
+	local type="${1:-aws_elasticache_serverless_cache}" name="${2:-cache}" attrs="${3:-{\}}"
+	export MOCK_STATE_JSON
+	MOCK_STATE_JSON=$(jq -cn --arg type "$type" --arg name "$name" --argjson attrs "$attrs" '{resources: [
+		{mode: "managed", type: "aws_elasticache_user_group", name: "cache", instances: [{attributes: {user_group_id: "np-my-cache-0f3a6-ug"}}]},
+		{mode: "managed", type: $type, name: $name, instances: [{attributes: ({
+			arn: "arn:aws:elasticache:us-west-2:222222222222:serverlesscache:np-my-cache-0f3a6",
+			subnet_ids: ["subnet-a", "subnet-b"], kms_key_id: "arn:aws:kms:us-west-2:222222222222:key/own"} + $attrs)}]},
+		{mode: "managed", type: "aws_kms_key", name: "cache", instances: [{attributes: {}}]}
+	]}')
+}
+
+@test "merges the developer's tags under the platform tags, which cannot be overridden" {
+	with_params '.parameters.tags = [{"key":" team ","value":" payments "},{"key":"account_id","value":"spoofed"},{"key":"","value":"x"}]'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.tags.team, .tags.account_id, (.tags | has(""))]')" '["payments","2",false]'
+}
+
+@test "keeps a tag with no value and accepts the tags as a key=value string" {
+	with_params '.parameters.tags = [{"key":"cost-center"}]'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.tags["cost-center"]')" '""'
+
+	with_params '.parameters.tags = "team=payments, env = prod,expr=a=b"'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.tags | {team, env, expr}')" '{"team":"payments","env":"prod","expr":"a=b"}'
+}
+
+@test "rejects a tag key that starts with aws:" {
+	with_params '.parameters.tags = [{"key":"aws:team","value":"x"}]'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: tag keys must not start with aws:"
+}
+
+@test "defaults to a Valkey 9 VPC cache with IPv4, the default security group, no backups and no usage limits" {
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=engine_version=9"
+	assert_equal "$(tfvars '{connection_type, network_type, security_group_ids, snapshot_retention_limit, daily_snapshot_time}')" \
+		'{"connection_type":"vpc","network_type":"ipv4","security_group_ids":[],"snapshot_retention_limit":0,"daily_snapshot_time":""}'
+	assert_equal "$(tfvars '[.data_storage_minimum_gb, .data_storage_maximum_gb, .ecpu_minimum, .ecpu_maximum]')" '[null,null,null,null]'
+}
+
+@test "creates a public cache without a vpc provider" {
+	export MOCK_NP_VPC_PROVIDERS='{"results":[]}'
+	with_params '.parameters += {engine_version: "9", connection_type: "public"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=vpc_id= -var=engine_version=9"
+	assert_equal "$(tfvars '[.connection_type, .subnet_ids]')" '["public",[]]'
+}
+
+@test "rejects a public cache before Valkey 9 and an unknown connection type" {
+	with_params '.parameters += {engine_version: "8", connection_type: "public"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: the public connection type requires Valkey 9"
+
+	with_params '.parameters += {engine_version: "9", connection_type: "internet"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: connection_type must be vpc or public"
+}
+
+@test "upgrades the engine of an existing cache but never downgrades it" {
+	existing_cache aws_elasticache_serverless_cache cache '{"major_engine_version":"8"}'
+	with_params '.parameters.engine_version = "9"'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=engine_version=9"
+
+	existing_cache aws_elasticache_serverless_cache cache '{"major_engine_version":"9"}'
+	with_params '.parameters.engine_version = "8"'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: the engine can only be upgraded (from 9 to 8 is a downgrade)"
+}
+
+@test "keeps the connection type and network type an existing cache was created with" {
+	existing_cache awscc_elasticache_serverless_cache public '{"major_engine_version":"9","network_type":"dual_stack"}'
+	with_params '.parameters += {connection_type: "vpc", settings_mode: "default"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.connection_type, .network_type]')" '["public","dual_stack"]'
+}
+
+@test "passes the network type on create and rejects an unknown one" {
+	with_params '.parameters += {settings_mode: "customize", network_type: "dual_stack"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.network_type')" '"dual_stack"'
+
+	with_params '.parameters += {settings_mode: "customize", network_type: "ipv5"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: network_type must be ipv4, ipv6 or dual_stack"
+}
+
+@test "places the cache in the VPC and subnets the developer sets, overriding the vpc provider" {
+	with_params '.parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: "subnet-0aa, subnet-0bb"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured VPC_ID)" "vpc-0abc"
+	assert_equal "$(tfvars '.subnet_ids')" '["subnet-0aa","subnet-0bb"]'
+
+	with_params '.parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: ""}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: set both vpc_id and subnet_ids"
+}
+
+@test "ignores the network override while the default settings are selected" {
+	with_params '.parameters += {settings_mode: "default", vpc_id: "vpc-0abc", subnet_ids: "subnet-0aa"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(captured VPC_ID)" "vpc-0123"
+}
+
+@test "uses the existing key chosen in the security settings instead of a dedicated one, and requires its ARN" {
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", security_settings: "customize", encryption_key: "existing", kms_key_arn: " arn:aws:kms:us-west-2:111122223333:key/abc "}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=kms_key_arn=arn:aws:kms:us-west-2:111122223333:key/abc"
+
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", security_settings: "customize", encryption_key: "existing", kms_key_arn: ""}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: kms_key_arn is required when encryption_key is existing"
+}
+
+@test "keeps the dedicated key while the default security settings are selected" {
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", security_settings: "default", encryption_key: "existing", kms_key_arn: "arn:aws:kms:us-west-2:111122223333:key/abc"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_not_contains "$(captured TOFU_VARIABLES)" "kms_key_arn"
+}
+
+@test "replaces the default security group with the selected ones, from a list or a comma-separated string" {
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", security_group_ids: ["sg-1", " sg-2 ", ""]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.security_group_ids')" '["sg-1","sg-2"]'
+
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", security_group_ids: "sg-1, sg-2"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.security_group_ids')" '["sg-1","sg-2"]'
+}
+
+@test "drops the selected security groups on a public cache" {
+	with_params '.parameters += {engine_version: "9", connection_type: "public", settings_mode: "customize", security_settings: "customize", security_group_ids: ["sg-1"]}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.security_group_ids')" '[]'
+}
+
+@test "turns on automatic backups with a one day retention unless another is given" {
+	with_params '.parameters += {settings_mode: "customize", automatic_backups: "enabled"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.snapshot_retention_limit, .daily_snapshot_time]')" '[1,""]'
+
+	with_params '.parameters += {settings_mode: "customize", automatic_backups: "enabled", backup_retention_days: 7, backup_window_start: "04:30"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.snapshot_retention_limit, .daily_snapshot_time]')" '[7,"04:30"]'
+}
+
+@test "rejects a backup retention outside 1-35 days and a malformed backup time" {
+	with_params '.parameters += {settings_mode: "customize", automatic_backups: "enabled", backup_retention_days: 36}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: backup_retention_days must be between 1 and 35"
+
+	with_params '.parameters += {settings_mode: "customize", automatic_backups: "enabled", backup_window_start: "25:00"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: backup_window_start must be a UTC time as HH:MM"
+}
+
+@test "passes the usage limits that are set, reading 0 as no limit" {
+	with_params '.parameters += {settings_mode: "customize", usage_limits: "set", data_storage_minimum_gb: 0, data_storage_maximum_gb: 10, ecpu_minimum: 1000, ecpu_maximum: 5000}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.data_storage_minimum_gb, .data_storage_maximum_gb, .ecpu_minimum, .ecpu_maximum]')" '[null,10,1000,5000]'
+}
+
+@test "clears every usage limit when they are set back to not set, whatever values were stored" {
+	with_params '.service.attributes += {data_storage_maximum_gb: 10} | .parameters += {settings_mode: "customize", usage_limits: "not_set", data_storage_maximum_gb: 10}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.data_storage_minimum_gb, .data_storage_maximum_gb, .ecpu_minimum, .ecpu_maximum]')" '[null,null,null,null]'
+}
+
+@test "rejects usage limits out of range or with a minimum above the maximum" {
+	with_params '.parameters += {settings_mode: "customize", usage_limits: "set", data_storage_maximum_gb: 5001}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: data_storage_maximum_gb must be 0 (no limit) or between 1 and 5000"
+
+	with_params '.parameters += {settings_mode: "customize", usage_limits: "set", ecpu_minimum: 999}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: ecpu_minimum must be 0 (no limit) or between 1000 and 15000000"
+
+	with_params '.parameters += {settings_mode: "customize", usage_limits: "set", data_storage_minimum_gb: 20, data_storage_maximum_gb: 10}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: data_storage_minimum_gb must not exceed data_storage_maximum_gb"
+}
+
+@test "ignores customized values while the default settings are selected, and rejects an unknown mode" {
+	with_params '.parameters += {settings_mode: "default", network_type: "dual_stack", security_settings: "customize", security_group_ids: ["sg-1"], automatic_backups: "enabled", usage_limits: "set", data_storage_maximum_gb: 10}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '{network_type, security_group_ids, snapshot_retention_limit, data_storage_maximum_gb}')" \
+		'{"network_type":"ipv4","security_group_ids":[],"snapshot_retention_limit":0,"data_storage_maximum_gb":null}'
+
+	with_params '.parameters += {settings_mode: "advanced"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: settings_mode must be default or customize"
+}
+
+@test "deletes with the stored settings, ignoring the form defaults the platform fills into the delete" {
+	export SERVICE_ACTION_TYPE=delete
+	export MOCK_NP_VPC_PROVIDERS='{"results":[]}'
+	existing_cache awscc_elasticache_serverless_cache public '{"major_engine_version":"9"}'
+	with_params '.service.attributes += {engine_version: "9", connection_type: "public"} | .parameters += {engine_version: "8", connection_type: "vpc"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=engine_version=9"
+	assert_equal "$(tfvars '.connection_type')" '"public"'
 }

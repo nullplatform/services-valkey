@@ -1,0 +1,10 @@
+# Only what the agent runs goes into the image.
+.git
+.github
+Dockerfile
+*.md
+**/.terraform
+**/*.tfstate*
+mise.toml
+docs
+tests

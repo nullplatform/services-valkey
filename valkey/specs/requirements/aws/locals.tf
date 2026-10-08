@@ -30,6 +30,13 @@ locals {
     "arn:aws:ec2:*:${local.account_id}:route-table/*",
   ]
 
+  # Link IAM users and their boundary. The permissions module derives the same names, so changing
+  # them here means changing them there too.
+  link_iam_path      = "/nullplatform/valkey/"
+  link_users_arn     = "arn:aws:iam::${local.account_id}:user${local.link_iam_path}${var.cache_name_prefix}*"
+  link_boundary_name = "${var.cache_name_prefix}valkey-link-boundary"
+  link_boundary_arn  = "arn:aws:iam::${local.account_id}:policy${local.link_iam_path}${local.link_boundary_name}"
+
   elasticache_service_linked_role_arn = "arn:aws:iam::${local.account_id}:role/aws-service-role/elasticache.amazonaws.com/AWSServiceRoleForElastiCache"
 
   iam_default_tags = merge(var.iam_resource_tags_json, {

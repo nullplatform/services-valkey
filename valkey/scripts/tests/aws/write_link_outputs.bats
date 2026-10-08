@@ -46,3 +46,25 @@ setup() {
 	assert_not_contains "$(cat "$MOCK_LOG")" "np link patch"
 	assert_contains "$captured_stderr" "ERROR: the service has no endpoint attribute yet."
 }
+
+@test "hands an IAM link its access key, region and a password-less connection url" {
+	CONTEXT=$(link_context '{"endpoint":"public-host","port":"6379","connection_type":"public","cache_name":"np-my-cache-0f3a6"}' '{}')
+	export MOCK_TOFU_OUTPUTS='{"user_name":{"value":"np-orders-api-7d9e2-user"},"auth_mode":{"value":"iam"},"user_password":{"value":""},"access_key_id":{"value":"AKIAEXAMPLE"},"secret_access_key":{"value":"secret-example","sensitive":true}}'
+	export REGION="us-west-2"
+	run_script write_link_outputs
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" '"user_name":"np-orders-api-7d9e2-user"'
+	assert_contains "$(cat "$MOCK_LOG")" '"access_key_id":"AKIAEXAMPLE"'
+	assert_contains "$(cat "$MOCK_LOG")" '"secret_access_key":"secret-example"'
+	assert_contains "$(cat "$MOCK_LOG")" '"aws_region":"us-west-2"'
+	assert_contains "$(cat "$MOCK_LOG")" '"cache_name":"np-my-cache-0f3a6"'
+	assert_contains "$(cat "$MOCK_LOG")" '"connection_url":"valkeys://np-orders-api-7d9e2-user@public-host:6379"'
+	assert_not_contains "$(cat "$MOCK_LOG")" '"user_password"'
+}
+
+@test "fails instead of writing an IAM link without its access key" {
+	export MOCK_TOFU_OUTPUTS='{"user_name":{"value":"np-orders-api-7d9e2-user"},"auth_mode":{"value":"iam"}}'
+	run_script write_link_outputs
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: the IAM user was created but its access key could not be read."
+}

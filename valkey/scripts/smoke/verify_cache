@@ -1,0 +1,213 @@
+#!/bin/bash
+# Smoke test: checks that the cache in AWS holds what the service holds in nullplatform, that is,
+# the values entered in the create or update form. With link IDs it also checks each link's
+# Valkey user and, for a public cache, its IAM user, boundary, policy and access key.
+#
+# Usage: verify_cache <service-id> [<link-id> ...]
+#
+# Needs np authenticated (NP_API_KEY or NULLPLATFORM_API_KEY) and AWS credentials for the cache's
+# account (AWS_PROFILE). Prints one PASS or FAIL line per value and exits 1 when any check fails.
+# The expected values are derived here from the form on purpose, not with build_context: a bug in
+# the conversion the service uses would otherwise pass its own check. Secrets are never printed.
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 <service-id> [<link-id> ...]" >&2
+  exit 2
+fi
+
+SERVICE_ID="$1"
+shift
+export NULLPLATFORM_API_KEY="${NULLPLATFORM_API_KEY:-${NP_API_KEY:-}}"
+
+LINK_IAM_PATH="/nullplatform/valkey/"
+LINK_BOUNDARY_NAME="np-valkey-link-boundary"
+
+PASSED=0
+FAILED=0
+
+check() {
+  local label="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    PASSED=$((PASSED + 1))
+    printf 'PASS  %-44s %s\n' "$label" "${actual:-<empty>}"
+  else
+    FAILED=$((FAILED + 1))
+    printf 'FAIL  %-44s expected %s, got %s\n' "$label" "${expected:-<empty>}" "${actual:-<empty>}"
+  fi
+}
+
+section() {
+  printf '\n== %s\n' "$1"
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+# A form value as the developer left it, or the form's default.
+attr() {
+  jq -r --arg key "$1" --arg default "${2:-}" '.attributes[$key] // "" | tostring | if . == "" then $default else . end' <<< "$SERVICE"
+}
+
+SERVICE=$(np service read --id "$SERVICE_ID" --format json) || die "could not read service ${SERVICE_ID}"
+CACHE_NAME=$(attr cache_name)
+[ -n "$CACHE_NAME" ] || die "service ${SERVICE_ID} has no cache_name attribute: it was never created"
+REGION=$(jq -r '.valkey_arn // "" | split(":") | .[3] // ""' <<< "$(jq -c '.attributes' <<< "$SERVICE")")
+[ -n "$REGION" ] || die "service ${SERVICE_ID} has no valkey_arn attribute"
+
+CACHE=$(aws elasticache describe-serverless-caches --serverless-cache-name "$CACHE_NAME" --region "$REGION" --output json \
+  | jq -c '.ServerlessCaches[0]') || die "cache ${CACHE_NAME} not found in ${REGION}"
+
+cache() {
+  jq -r "$1" <<< "$CACHE"
+}
+
+SETTINGS_MODE=$(attr settings_mode default)
+SECURITY_SETTINGS=default
+[ "$SETTINGS_MODE" = "customize" ] && SECURITY_SETTINGS=$(attr security_settings default)
+CONNECTION_TYPE=$(attr connection_type vpc)
+
+verify_identity() {
+  section "Cache"
+  check "status" "available" "$(cache '.Status')"
+  check "name" "$CACHE_NAME" "$(cache '.ServerlessCacheName')"
+  check "arn" "$(attr valkey_arn)" "$(cache '.ARN')"
+  check "endpoint" "$(attr endpoint)" "$(cache '.Endpoint.Address')"
+  check "port" "$(attr port)" "$(cache '.Endpoint.Port | tostring')"
+  check "engine version" "$(attr engine_version 9)" "$(cache '.MajorEngineVersion')"
+}
+
+verify_connectivity() {
+  section "Connectivity"
+  local expected_network=ipv4
+  [ "$SETTINGS_MODE" = "customize" ] && expected_network=$(attr network_type ipv4)
+  check "network type" "$expected_network" "$(cache '.NetworkType')"
+
+  if [ "$CONNECTION_TYPE" = "public" ]; then
+    check "public endpoint" "true" "$(cache '.Endpoint.Address | contains(".public.")')"
+    check "no subnets" "0" "$(cache '.SubnetIds // [] | length')"
+    check "no security groups" "0" "$(cache '.SecurityGroupIds // [] | length')"
+    return
+  fi
+
+  check "private endpoint" "false" "$(cache '.Endpoint.Address | contains(".public.")')"
+  if [ "$SETTINGS_MODE" = "customize" ] && [ -n "$(attr subnet_ids)" ]; then
+    check "subnets" "$(attr subnet_ids | tr -d '[:space:]' | tr ',' '\n' | sort | paste -sd, -)" \
+      "$(cache '.SubnetIds | sort | join(",")')"
+  fi
+
+  local selected=""
+  if [ "$SECURITY_SETTINGS" = "customize" ]; then
+    selected=$(jq -r '.attributes.security_group_ids // [] | if type == "string" then split(",") else . end
+      | map(gsub("\\s"; "") | select(. != "")) | sort | join(",")' <<< "$SERVICE")
+  fi
+  if [ -n "$selected" ]; then
+    check "selected security groups" "$selected" "$(cache '.SecurityGroupIds | sort | join(",")')"
+  else
+    local group_id group_name
+    group_id=$(cache '.SecurityGroupIds[0] // ""')
+    group_name=$(aws ec2 describe-security-groups --group-ids "$group_id" --region "$REGION" \
+      --query 'SecurityGroups[0].GroupName' --output text 2>/dev/null || true)
+    check "default security group" "${CACHE_NAME}-security-group" "$group_name"
+  fi
+}
+
+verify_encryption() {
+  section "Encryption"
+  if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$(attr encryption_key dedicated)" = "existing" ]; then
+    check "existing customer managed key" "$(attr kms_key_arn | tr -d '[:space:]')" "$(cache '.KmsKeyId')"
+    return
+  fi
+  local dedicated
+  dedicated=$(aws kms describe-key --key-id "alias/nullplatform-valkey-${CACHE_NAME}" --region "$REGION" \
+    --query 'KeyMetadata.Arn' --output text 2>/dev/null || true)
+  check "dedicated customer managed key" "$dedicated" "$(cache '.KmsKeyId')"
+}
+
+verify_backups() {
+  section "Backups"
+  if [ "$SETTINGS_MODE" = "customize" ] && [ "$(attr automatic_backups disabled)" = "enabled" ]; then
+    check "retention (days)" "$(attr backup_retention_days 1)" "$(cache '.SnapshotRetentionLimit | tostring')"
+    if [ -n "$(attr backup_window_start)" ]; then
+      check "daily start (UTC)" "$(attr backup_window_start)" "$(cache '.DailySnapshotTime')"
+    fi
+  else
+    check "automatic backups off" "0" "$(cache '.SnapshotRetentionLimit // 0 | tostring')"
+  fi
+}
+
+verify_usage_limits() {
+  section "Usage limits"
+  local key path expected
+  for pair in data_storage_minimum_gb:DataStorage.Minimum data_storage_maximum_gb:DataStorage.Maximum \
+    ecpu_minimum:ECPUPerSecond.Minimum ecpu_maximum:ECPUPerSecond.Maximum; do
+    key="${pair%%:*}"
+    path="${pair#*:}"
+    expected=""
+    if [ "$SETTINGS_MODE" = "customize" ] && [ "$(attr usage_limits not_set)" = "set" ]; then
+      expected=$(attr "$key")
+      [ "$expected" = "0" ] && expected=""
+    fi
+    check "$key" "$expected" "$(cache ".CacheUsageLimits.${path} // \"\" | tostring | if . == \"0\" then \"\" else . end")"
+  done
+}
+
+verify_tags() {
+  section "Tags"
+  local tags key value
+  tags=$(aws elasticache list-tags-for-resource --resource-name "$(cache '.ARN')" --region "$REGION" --output json \
+    | jq -c '(.TagList // []) | map({(.Key): .Value}) | add // {}')
+  while IFS=$'\t' read -r key value; do
+    [ -n "$key" ] || continue
+    check "tag ${key}" "$value" "$(jq -r --arg key "$key" '.[$key] // ""' <<< "$tags")"
+  done < <(jq -r '.attributes.tags // [] | if type == "array" then .[] | select((.key // "") != "") | [(.key | gsub("^\\s+|\\s+$"; "")), ((.value // "") | tostring | gsub("^\\s+|\\s+$"; ""))] | @tsv else empty end' <<< "$SERVICE")
+  check "tag managed-by" "nullplatform" "$(jq -r '."managed-by" // ""' <<< "$tags")"
+  check "tag service-id" "$SERVICE_ID" "$(jq -r '."service-id" // ""' <<< "$tags")"
+}
+
+verify_link() {
+  local link_id="$1" link user user_name auth groups
+  link=$(np link read --id "$link_id" --format json) || die "could not read link ${link_id}"
+  user_name=$(jq -r '.attributes.user_name // ""' <<< "$link")
+  section "Link ${link_id} (${user_name:-no user})"
+  check "link status" "active" "$(jq -r '.status' <<< "$link")"
+  [ -n "$user_name" ] || return
+
+  user=$(aws elasticache describe-users --user-id "$user_name" --region "$REGION" --output json | jq -c '.Users[0]')
+  groups=$(jq -r '.UserGroupIds | join(",")' <<< "$user")
+  check "valkey user in the cache's group" "${CACHE_NAME}-ug" "$groups"
+  check "valkey user access" "on ~* +@all" "$(jq -r '.AccessString' <<< "$user")"
+
+  if [ "$CONNECTION_TYPE" = "public" ]; then
+    auth=$(jq -r '.Authentication.Type' <<< "$user")
+    check "valkey user authentication" "iam" "$auth"
+    check "IAM user path" "$LINK_IAM_PATH" "$(aws iam get-user --user-name "$user_name" --query 'User.Path' --output text)"
+    check "IAM user boundary" "$LINK_BOUNDARY_NAME" \
+      "$(aws iam get-user --user-name "$user_name" --query 'User.PermissionsBoundary.PermissionsBoundaryArn' --output text | sed 's|.*/||')"
+    check "IAM policy" "elasticache:Connect on $(cache '.ARN'),$(jq -r '.ARN' <<< "$user")" \
+      "$(aws iam get-user-policy --user-name "$user_name" --policy-name "${user_name}-connect" --output json \
+        | jq -r '.PolicyDocument.Statement[0] | "\(.Action) on \(.Resource | sort | join(","))"')"
+    check "access key handed to the link" "$(jq -r '.attributes.access_key_id // ""' <<< "$link")" \
+      "$(aws iam list-access-keys --user-name "$user_name" --query 'AccessKeyMetadata[?Status==`Active`].AccessKeyId' --output text)"
+  else
+    check "valkey user authentication" "password" "$(jq -r '.Authentication.Type' <<< "$user")"
+  fi
+}
+
+printf 'Service %s -> cache %s (%s, %s)\n' "$SERVICE_ID" "$CACHE_NAME" "$CONNECTION_TYPE" "$REGION"
+
+verify_identity
+verify_connectivity
+verify_encryption
+verify_backups
+verify_usage_limits
+verify_tags
+
+for link_id in "$@"; do
+  verify_link "$link_id"
+done
+
+printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
+[ "$FAILED" -eq 0 ]

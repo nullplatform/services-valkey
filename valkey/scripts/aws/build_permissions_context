@@ -38,6 +38,13 @@ fi
 
 USER_GROUP_ID="${CACHE_NAME}-ug"
 
+# A public cache only accepts IAM-authenticated users; a VPC cache (and any cache created
+# before the connection type existed) uses password users.
+AUTH_MODE="password"
+if [ "$(echo "$CONTEXT" | jq -r '.service.attributes.connection_type // "vpc"')" = "public" ]; then
+  AUTH_MODE="iam"
+fi
+
 echo "Link ${LINK_ID} -> cache ${CACHE_NAME} (user: ${LINK_USER_NAME})"
 
 export OUTPUT_DIR="/tmp/np-link-${LINK_ID}"
@@ -47,4 +54,4 @@ export TOFU_MODULE_DIR="$SERVICE_PATH/permissions"
 
 export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}links/${LINK_ID}.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
 
-export TOFU_VARIABLES="-var=link_id=${LINK_ID} -var=region=${REGION} -var=user_group_id=${USER_GROUP_ID} -var=user_name=${LINK_USER_NAME}"
+export TOFU_VARIABLES="-var=link_id=${LINK_ID} -var=region=${REGION} -var=user_group_id=${USER_GROUP_ID} -var=user_name=${LINK_USER_NAME} -var=auth_mode=${AUTH_MODE} -var=cache_arn=${VALKEY_ARN}"

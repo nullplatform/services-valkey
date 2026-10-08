@@ -1,3 +1,9 @@
+variable "region" {
+  description = "Region the IAM resources are created through. IAM is global; this only selects the API endpoint."
+  type        = string
+  default     = "us-east-1"
+}
+
 variable "agent_role_arn" {
   description = "ARN of the primary nullplatform agent IRSA role allowed to assume this permissions role via sts:AssumeRole, and always a trusted principal of the role's trust policy. Defaults (when empty) to the conventional agent role for the cluster: arn:aws:iam::<account>:role/nullplatform-<cluster_name>-agent-role."
   type        = string
