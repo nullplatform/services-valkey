@@ -28,12 +28,18 @@ steps:
         type: environment
       - name: TOFU_VARIABLES
         type: environment
+      - name: CACHE_NAME
+        type: environment
 
   - name: tofu
     type: script
     file: $SERVICE_PATH/scripts/aws/do_tofu
     configuration:
       TOFU_ACTION: apply
+
+  - name: clear removed usage limits
+    type: script
+    file: $SERVICE_PATH/scripts/aws/clear_usage_limits
 
   - name: write service outputs
     type: script

@@ -63,6 +63,10 @@ require_network_ids() {
     exit 1
   fi
 
+  if [ "${CONNECTION_TYPE:-vpc}" = "public" ]; then
+    return 0
+  fi
+
   if [[ ! "$VPC_ID" =~ ^vpc-[0-9a-f]+$ ]]; then
     echo "ERROR: ${source} gives '${VPC_ID}', which is not a VPC ID." >&2
     exit 1
@@ -117,7 +121,7 @@ kms_key_from_state() {
 
   jq -r '
     [.resources[]? | select(.mode == "managed")] as $resources
-    | ($resources | map(select(.type == "aws_elasticache_serverless_cache" and .name == "cache")) | .[0].instances[0].attributes.kms_key_id // "") as $cache_key
+    | ($resources | map(select((.type == "aws_elasticache_serverless_cache" and .name == "cache") or (.type == "awscc_elasticache_serverless_cache" and .name == "public"))) | .[0].instances[0].attributes.kms_key_id // "") as $cache_key
     | if $cache_key == "" then ""
       elif ($resources | any(.type == "aws_kms_key" and .name == "cache")) then "managed"
       else $cache_key end' "$destination"
@@ -130,7 +134,7 @@ resolve_kms_key_arn() {
   managed) resolved="" ;;
   "")
     if [ "$action_type" = "create" ]; then
-      resolved="${VALKEY_KMS_KEY_ARN:-}"
+      resolved="${FORM_KMS_KEY_ARN:-${VALKEY_KMS_KEY_ARN:-}}"
     fi
     ;;
   *) resolved="$state_key" ;;
@@ -142,6 +146,90 @@ resolve_kms_key_arn() {
   fi
 
   echo "$resolved"
+}
+
+# The settings a cache was created with, read from the tofu state: the ones fixed after creation
+# must never change, and the engine can only move up.
+cache_from_state() {
+  jq -c '[.resources[]? | select(.mode == "managed")
+    | select((.type == "aws_elasticache_serverless_cache" and .name == "cache") or (.type == "awscc_elasticache_serverless_cache" and .name == "public"))
+    | {connection_type: (if .type == "awscc_elasticache_serverless_cache" then "public" else "vpc" end),
+       engine_version: (.instances[0].attributes.major_engine_version // ""),
+       network_type: (.instances[0].attributes.network_type // "")}][0] // {}' "$1"
+}
+
+user_tags_json() {
+  local raw="$1" tags
+  tags=$(echo "$raw" | jq -c '
+    def trim: gsub("^\\s+|\\s+$"; "");
+    if type == "array" then
+      map(select((.key // "") != "") | {(.key | trim): ((.value // "") | tostring | trim)}) | add // {}
+    elif type == "string" then
+      split(",") | map(select(trim != "") | split("=") | {(.[0] | trim): (.[1:] | join("=") | trim)}) | add // {}
+    else {} end')
+  if echo "$tags" | jq -e 'keys | any(startswith("aws:"))' >/dev/null; then
+    echo "ERROR: tag keys must not start with aws:" >&2
+    return 1
+  fi
+  echo "$tags"
+}
+
+attr_or() {
+  local key="$1" default="$2"
+  echo "$SERVICE_ATTRS" | jq -r --arg key "$key" --arg default "$default" \
+    '.[$key] // "" | tostring | if . == "" then $default else . end'
+}
+
+# Like the console: "Use default settings" keeps every recommended value; "Customize default
+# settings" opens the rest of the form.
+choice() {
+  local key="$1" default="$2" value allowed
+  shift 2
+  value=$(attr_or "$key" "$default")
+  for allowed in "$@"; do
+    if [ "$value" = "$allowed" ]; then
+      echo "$value"
+      return 0
+    fi
+  done
+  echo "ERROR: ${key} must be $(echo "$*" | sed 's/ \([^ ]*\)$/ or \1/; s/ \([^ ]*\) or/, \1 or/g'), got '${value}'" >&2
+  exit 1
+}
+
+require_integer_between() {
+  local name="$1" value="$2" min="$3" max="$4"
+  if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+    echo "ERROR: ${name} must be between ${min} and ${max}, got '${value}'" >&2
+    exit 1
+  fi
+}
+
+# Each limit is optional: an unset one stays null so the cache scales freely on that side.
+usage_limits_json() {
+  local json='{}' spec key min max value lo hi
+  # key:min:max, the ranges ElastiCache Serverless accepts.
+  for spec in data_storage_minimum_gb:1:5000 data_storage_maximum_gb:1:5000 ecpu_minimum:1000:15000000 ecpu_maximum:1000:15000000; do
+    IFS=: read -r key min max <<< "$spec"
+    value=$(attr_or "$key" "")
+    # 0 is how the form removes a single limit: an emptied field never reaches the update.
+    if [ -z "$value" ] || [ "$value" = "0" ]; then
+      json=$(echo "$json" | jq -c --arg key "$key" '.[$key] = null')
+      continue
+    fi
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+      echo "ERROR: ${key} must be 0 (no limit) or between ${min} and ${max}, got '${value}'" >&2
+      exit 1
+    fi
+    json=$(echo "$json" | jq -c --arg key "$key" --argjson value "$value" '.[$key] = $value')
+  done
+  for spec in data_storage_minimum_gb:data_storage_maximum_gb ecpu_minimum:ecpu_maximum; do
+    IFS=: read -r lo hi <<< "$spec"
+    if echo "$json" | jq -e --arg lo "$lo" --arg hi "$hi" '.[$lo] != null and .[$hi] != null and .[$lo] > .[$hi]' >/dev/null; then
+      echo "ERROR: ${lo} must not exceed ${hi}" >&2
+      exit 1
+    fi
+  done
+  echo "$json"
 }
 
 require_state_bucket() {
@@ -164,6 +252,21 @@ require_state_bucket() {
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
 SERVICE_LABEL=$(echo "$CONTEXT" | jq -r '.service.slug // .service.name // ""')
 export SERVICE_ID
+
+SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '(.service.attributes // {}) * (.parameters // {})')
+# A delete carries the form defaults in its parameters (engine 9, VPC...), not the cache's settings:
+# it is built from the stored attributes alone, so whatever the cache is can still be destroyed.
+if [ "${SERVICE_ACTION_TYPE:-}" = "delete" ]; then
+  SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '.service.attributes // {}')
+fi
+
+ENGINE_VERSION=$(choice engine_version 9 7 8 9)
+CONNECTION_TYPE=$(choice connection_type vpc vpc public)
+SETTINGS_MODE=$(choice settings_mode default default customize)
+SECURITY_SETTINGS=default
+if [ "$SETTINGS_MODE" = "customize" ]; then
+  SECURITY_SETTINGS=$(choice security_settings default default customize)
+fi
 
 AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
 if [ -n "$AWS_PROFILE_VAL" ]; then
@@ -190,21 +293,45 @@ if [ -z "$REGION" ]; then
   exit 1
 fi
 
-VPC_ATTRIBUTES=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS")
-VPC_ID=$(echo "$VPC_ATTRIBUTES" | jq -r '.vpc.id // ""')
-SUBNET_IDS=$(echo "$VPC_ATTRIBUTES" | jq -c '[(.vpc.subnets // [])[] | select(type == "string" and . != "")]')
+# A public cache is reached over the internet: it has no VPC, subnets or security groups.
+VPC_ID=""
+SUBNET_IDS="[]"
+NETWORK_SOURCE="the ${LOOKUP_TARGET} providers"
+if [ "$CONNECTION_TYPE" = "vpc" ]; then
+  VPC_ATTRIBUTES=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS")
+  VPC_ID=$(echo "$VPC_ATTRIBUTES" | jq -r '.vpc.id // ""')
+  SUBNET_IDS=$(echo "$VPC_ATTRIBUTES" | jq -c '[(.vpc.subnets // [])[] | select(type == "string" and . != "")]')
 
-if [ -z "$VPC_ID" ]; then
-  echo "ERROR: no vpc provider with vpc.id found for ${LOOKUP_TARGET}" >&2
-  exit 1
+  # "Customize default settings" can place the cache in another VPC and subnets.
+  if [ "$SETTINGS_MODE" = "customize" ]; then
+    OVERRIDE_VPC_ID=$(attr_or vpc_id "" | tr -d '[:space:]')
+    OVERRIDE_SUBNET_IDS=$(echo "$SERVICE_ATTRS" | jq -c '
+      def trim: gsub("^\\s+|\\s+$"; "");
+      (.subnet_ids // []) | (if type == "string" then split(",") else . end)
+      | map(tostring | trim | select(. != ""))')
+    if [ -n "$OVERRIDE_VPC_ID" ] || [ "$OVERRIDE_SUBNET_IDS" != "[]" ]; then
+      if [ -z "$OVERRIDE_VPC_ID" ] || [ "$OVERRIDE_SUBNET_IDS" = "[]" ]; then
+        echo "ERROR: set both vpc_id and subnet_ids to place the cache outside the vpc provider's network" >&2
+        exit 1
+      fi
+      VPC_ID="$OVERRIDE_VPC_ID"
+      SUBNET_IDS="$OVERRIDE_SUBNET_IDS"
+      NETWORK_SOURCE="the service's settings"
+    fi
+  fi
+
+  if [ -z "$VPC_ID" ]; then
+    echo "ERROR: no vpc provider with vpc.id found for ${LOOKUP_TARGET}" >&2
+    exit 1
+  fi
+
+  if [ "$SUBNET_IDS" = "[]" ]; then
+    echo "ERROR: the vpc provider for ${LOOKUP_TARGET} has no vpc.subnets; list the private subnets the cache should use" >&2
+    exit 1
+  fi
 fi
 
-if [ "$SUBNET_IDS" = "[]" ]; then
-  echo "ERROR: the vpc provider for ${LOOKUP_TARGET} has no vpc.subnets; list the private subnets the cache should use" >&2
-  exit 1
-fi
-
-require_network_ids "the ${LOOKUP_TARGET} providers"
+require_network_ids "$NETWORK_SOURCE"
 
 require_state_bucket "$REGION"
 TFSTATE_BUCKET="$VALKEY_S3_STATE_BUCKET"
@@ -225,14 +352,76 @@ if [ "$STATE_STATUS" -eq 1 ]; then
   exit 1
 fi
 
+STATE_CACHE='{}'
 if [ "$STATE_STATUS" -eq 0 ]; then
-  keep_network_from_state "$STATE_FILE"
-  require_network_ids "the tofu state"
+  STATE_CACHE=$(cache_from_state "$STATE_FILE")
+  if [ "$(echo "$STATE_CACHE" | jq -r '.connection_type // "vpc"')" = "vpc" ]; then
+    keep_network_from_state "$STATE_FILE"
+    require_network_ids "the tofu state"
+  fi
   CACHE_NAME=$(resolve_cache_name "$STATE_FILE")
 else
   CACHE_NAME=$(resolve_cache_name "")
 fi
 export CACHE_NAME
+
+CACHE_EXISTS=false
+if [ "$STATE_CACHE" != "{}" ]; then
+  CACHE_EXISTS=true
+  STATE_CONNECTION_TYPE=$(echo "$STATE_CACHE" | jq -r '.connection_type')
+  if [ "$STATE_CONNECTION_TYPE" != "$CONNECTION_TYPE" ]; then
+    echo "WARNING: this cache was created with the ${STATE_CONNECTION_TYPE} connection type, which is fixed after creation; keeping it." >&2
+    CONNECTION_TYPE="$STATE_CONNECTION_TYPE"
+  fi
+  PREVIOUS_ENGINE_VERSION=$(echo "$STATE_CACHE" | jq -r '.engine_version')
+  if [ -n "$PREVIOUS_ENGINE_VERSION" ] && [ "${SERVICE_ACTION_TYPE:-}" != "delete" ] \
+    && [ "$ENGINE_VERSION" -lt "$PREVIOUS_ENGINE_VERSION" ]; then
+    echo "ERROR: the engine can only be upgraded (from ${PREVIOUS_ENGINE_VERSION} to ${ENGINE_VERSION} is a downgrade)" >&2
+    exit 1
+  fi
+fi
+
+if [ "$CONNECTION_TYPE" = "public" ] && [ "$ENGINE_VERSION" -lt 9 ]; then
+  echo "ERROR: the public connection type requires Valkey 9 or later (got ${ENGINE_VERSION})" >&2
+  exit 1
+fi
+export ENGINE_VERSION CONNECTION_TYPE
+
+# The network type is fixed at creation: an existing cache keeps the one in its state.
+NETWORK_TYPE=ipv4
+if [ "$CACHE_EXISTS" = true ] && [ -n "$(echo "$STATE_CACHE" | jq -r '.network_type')" ]; then
+  NETWORK_TYPE=$(echo "$STATE_CACHE" | jq -r '.network_type')
+elif [ "$SETTINGS_MODE" = "customize" ]; then
+  NETWORK_TYPE=$(choice network_type ipv4 ipv4 ipv6 dual_stack)
+fi
+
+SECURITY_GROUP_IDS='[]'
+if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$CONNECTION_TYPE" = "vpc" ]; then
+  # The selected security groups replace the default one.
+  SECURITY_GROUP_IDS=$(echo "$SERVICE_ATTRS" | jq -c '
+    def trim: gsub("^\\s+|\\s+$"; "");
+    (.security_group_ids // []) | (if type == "string" then split(",") else . end)
+    | map(tostring | trim | select(. != ""))')
+fi
+
+SNAPSHOT_RETENTION_LIMIT=0
+DAILY_SNAPSHOT_TIME=""
+if [ "$SETTINGS_MODE" = "customize" ] && [ "$(choice automatic_backups disabled disabled enabled)" = "enabled" ]; then
+  SNAPSHOT_RETENTION_LIMIT=$(attr_or backup_retention_days 1)
+  require_integer_between backup_retention_days "$SNAPSHOT_RETENTION_LIMIT" 1 35
+  DAILY_SNAPSHOT_TIME=$(attr_or backup_window_start "" | tr -d '[:space:]')
+  if [ -n "$DAILY_SNAPSHOT_TIME" ] && ! [[ "$DAILY_SNAPSHOT_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "ERROR: backup_window_start must be a UTC time as HH:MM, got '${DAILY_SNAPSHOT_TIME}'" >&2
+    exit 1
+  fi
+fi
+
+# The platform merges every stored attribute into an update, so a limit the developer emptied
+# would come back: limits only apply while "Set" is chosen, and "Not set" clears them all.
+USAGE_LIMITS='{"data_storage_minimum_gb":null,"data_storage_maximum_gb":null,"ecpu_minimum":null,"ecpu_maximum":null}'
+if [ "$SETTINGS_MODE" = "customize" ] && [ "$(choice usage_limits not_set not_set set)" = "set" ]; then
+  USAGE_LIMITS=$(usage_limits_json)
+fi
 
 echo "Using region: ${REGION}"
 echo "Using VPC: ${VPC_ID}"
@@ -244,12 +433,40 @@ export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
 export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION} -backend-config=use_lockfile=true"
 
 TFVARS_FILE="$OUTPUT_DIR/terraform.tfvars.json"
-echo "$CONTEXT" | jq --argjson subnet_ids "$SUBNET_IDS" '{
-  subnet_ids: $subnet_ids,
-  tags: ((.tags // {}) | with_entries(select(.value | type == "string")))
-}' > "$TFVARS_FILE"
+USER_TAGS=$(user_tags_json "$(echo "$SERVICE_ATTRS" | jq -c '.tags // []')")
+PLATFORM_TAGS=$(echo "$CONTEXT" | jq -c '(.tags // {}) | with_entries(select(.value | type == "string"))')
+jq -n \
+  --argjson subnet_ids "$SUBNET_IDS" \
+  --argjson user "$USER_TAGS" \
+  --argjson platform "$PLATFORM_TAGS" \
+  --arg connection_type "$CONNECTION_TYPE" \
+  --arg network_type "$NETWORK_TYPE" \
+  --argjson security_group_ids "$SECURITY_GROUP_IDS" \
+  --argjson snapshot_retention_limit "$SNAPSHOT_RETENTION_LIMIT" \
+  --arg daily_snapshot_time "$DAILY_SNAPSHOT_TIME" \
+  --argjson usage_limits "$USAGE_LIMITS" \
+  '{
+    subnet_ids: $subnet_ids,
+    tags: ($user + $platform),
+    connection_type: $connection_type,
+    network_type: $network_type,
+    security_group_ids: $security_group_ids,
+    snapshot_retention_limit: $snapshot_retention_limit,
+    daily_snapshot_time: $daily_snapshot_time
+  } + $usage_limits' > "$TFVARS_FILE"
 
-TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var-file=${TFVARS_FILE}"
+TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var=engine_version=${ENGINE_VERSION} -var-file=${TFVARS_FILE}"
+
+# "Customize your security settings" can name an existing customer managed key instead of the
+# dedicated one; like the rest of the encryption settings, it only matters on create.
+FORM_KMS_KEY_ARN=""
+if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$(choice encryption_key dedicated dedicated existing)" = "existing" ]; then
+  FORM_KMS_KEY_ARN=$(attr_or kms_key_arn "" | tr -d '[:space:]')
+  if [ -z "$FORM_KMS_KEY_ARN" ]; then
+    echo "ERROR: kms_key_arn is required when encryption_key is existing" >&2
+    exit 1
+  fi
+fi
 
 KMS_KEY_ARN=$(resolve_kms_key_arn "$(echo "$CONTEXT" | jq -r '.type // ""')" "$STATE_KMS_KEY")
 

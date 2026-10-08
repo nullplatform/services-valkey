@@ -10,3 +10,4 @@ state_bucket_name = "<existing S3 bucket for the tofu state, e.g. np-valkey-stat
 # attach_metrics_policy_to_agent_roles = true
 # iam_resource_tags_json               = { managed-by = "nullplatform" }
 # external_kms_key_arns                = ["arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"]
+# region                     = "us-east-1"

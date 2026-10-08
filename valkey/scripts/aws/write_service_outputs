@@ -11,6 +11,7 @@ ENDPOINT=$(echo "$OUTPUTS"   | jq -r '.endpoint.value   // ""')
 PORT=$(echo "$OUTPUTS"       | jq -r '.port.value       // ""')
 VALKEY_ARN=$(echo "$OUTPUTS" | jq -r '.valkey_arn.value // ""')
 CACHE_NAME=$(echo "$OUTPUTS" | jq -r '.cache_name.value // ""')
+CONNECTION_TYPE=$(echo "$OUTPUTS" | jq -r '.connection_type.value // "vpc"')
 
 if [ -z "$ENDPOINT" ]; then
   echo "WARNING: No endpoint output found. Skipping attribute update."
@@ -22,11 +23,13 @@ ATTRIBUTES=$(jq -n -c \
   --arg port       "$PORT" \
   --arg valkey_arn "$VALKEY_ARN" \
   --arg cache_name "$CACHE_NAME" \
+  --arg connection_type "$CONNECTION_TYPE" \
   '{
     endpoint:   $endpoint,
     port:       $port,
     valkey_arn: $valkey_arn,
-    cache_name: $cache_name
+    cache_name: $cache_name,
+    connection_type: $connection_type
   }')
 
 echo "Writing service attributes for service ${SERVICE_ID}:"
