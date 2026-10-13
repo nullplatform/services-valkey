@@ -43,26 +43,27 @@ rule_of() {
 }
 
 @test "the settings AWS fixes at creation can only be set on create" {
-	for key in connection_type network_type vpc_id subnet_ids encryption_key kms_key_arn; do
+	for key in connection_type network_type vpc_id subnet_ids encryption_key kms_key_arn access_control user_group_id; do
 		assert_equal "$(prop "$key" | jq -c '.editableOn')" '["create"]' || { echo "$key"; return 1; }
 	done
 }
 
 @test "every other input can be changed after creation" {
 	for key in $(inputs); do
-		case "$key" in connection_type | network_type | vpc_id | subnet_ids | encryption_key | kms_key_arn) continue ;; esac
+		case "$key" in connection_type | network_type | vpc_id | subnet_ids | encryption_key | kms_key_arn | access_control | user_group_id) continue ;; esac
 		assert_equal "$(prop "$key" | jq -c '.editableOn')" '["create","update"]' || { echo "$key"; return 1; }
 	done
 }
 
 @test "the defaults match the ones build_context applies" {
-	assert_equal "$(jq -c '.attributes.schema.properties | [.engine_version, .connection_type, .settings_mode, .network_type, .security_settings, .encryption_key, .automatic_backups, .backup_retention_days, .usage_limits] | map(.default)' "$SPEC")" \
-		'["9","vpc","default","ipv4","default","dedicated","disabled",1,"not_set"]'
+	assert_equal "$(jq -c '.attributes.schema.properties | [.engine_version, .connection_type, .settings_mode, .network_type, .security_settings, .encryption_key, .access_control, .automatic_backups, .backup_retention_days, .usage_limits] | map(.default)' "$SPEC")" \
+		'["9","vpc","default","ipv4","default","aws_owned","none","disabled",1,"not_set"]'
 	grep -q 'choice engine_version 9 ' "$SERVICE_PATH/scripts/aws/build_context"
 	grep -q 'choice connection_type vpc ' "$SERVICE_PATH/scripts/aws/build_context"
 	grep -q 'choice settings_mode default ' "$SERVICE_PATH/scripts/aws/build_context"
 	grep -q 'choice security_settings default ' "$SERVICE_PATH/scripts/aws/build_context"
-	grep -q 'choice encryption_key dedicated ' "$SERVICE_PATH/scripts/aws/build_context"
+	grep -q 'choice encryption_key aws_owned ' "$SERVICE_PATH/scripts/aws/build_context"
+	grep -q 'choice access_control none ' "$SERVICE_PATH/scripts/aws/build_context"
 	grep -q 'choice automatic_backups disabled ' "$SERVICE_PATH/scripts/aws/build_context"
 	grep -q 'choice usage_limits not_set ' "$SERVICE_PATH/scripts/aws/build_context"
 	grep -q 'attr_or backup_retention_days 1)' "$SERVICE_PATH/scripts/aws/build_context"
@@ -71,7 +72,7 @@ rule_of() {
 @test "the enum values are the ones the scripts understand" {
 	assert_equal "$(prop engine_version | jq -c '.enum')" '["7","8","9"]'
 	for pair in connection_type:vpc,public settings_mode:default,customize network_type:ipv4,dual_stack,ipv6 \
-		security_settings:default,customize encryption_key:dedicated,existing automatic_backups:disabled,enabled usage_limits:not_set,set; do
+		security_settings:default,customize encryption_key:aws_owned,customer_managed access_control:none,user_group automatic_backups:disabled,enabled usage_limits:not_set,set; do
 		assert_equal "$(prop "${pair%%:*}" | jq -r '[.oneOf[].const] | join(",")')" "${pair#*:}" || { echo "$pair"; return 1; }
 	done
 }
@@ -99,7 +100,8 @@ rule_of() {
 	for key in network_type security_settings automatic_backups usage_limits; do
 		assert_equal "$(rule_of "$key" | jq -c '.condition')" '{"scope":"#/properties/settings_mode","schema":{"const":"customize"}}' || { echo "$key"; return 1; }
 	done
-	assert_equal "$(rule_of kms_key_arn | jq -c '.condition.schema')" '{"const":"existing"}'
+	assert_equal "$(rule_of kms_key_arn | jq -c '.condition.schema')" '{"const":"customer_managed"}'
+	assert_equal "$(rule_of user_group_id | jq -c '.condition')" '{"scope":"#/properties/access_control","schema":{"const":"user_group"}}'
 	for key in backup_retention_days backup_window_start; do
 		assert_equal "$(rule_of "$key" | jq -c '.condition')" '{"scope":"#/properties/automatic_backups","schema":{"const":"enabled"}}'
 	done
@@ -122,5 +124,11 @@ rule_of() {
 @test "the link exports its credentials as secrets and the rest as plain values" {
 	assert_equal "$(jq -c '[.attributes.schema.properties | to_entries[] | select((.value.export | type) == "object" and .value.export.secret == true) | .key] | sort' "$LINK_SPEC")" '["connection_url","secret_access_key","user_password"]'
 	assert_equal "$(jq -c '[.attributes.schema.properties | to_entries[] | select(.value.export == true) | .key] | sort' "$LINK_SPEC")" '["access_key_id","aws_region","cache_name","user_name"]'
-	assert_equal "$(jq -c '.attributes.schema.required' "$LINK_SPEC")" '["user_name","connection_url"]'
+	assert_equal "$(jq -c '.attributes.schema.required' "$LINK_SPEC")" '["connection_url"]'
+}
+
+@test "the VPC and subnets the customized settings show are not marked optional" {
+	for key in vpc_id subnet_ids; do
+		assert_not_contains "$(prop "$key" | jq -r '.title')" "optional" || { echo "$key"; return 1; }
+	done
 }

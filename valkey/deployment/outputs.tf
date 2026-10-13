@@ -20,8 +20,8 @@ output "valkey_arn" {
 }
 
 output "user_group_id" {
-  value       = aws_elasticache_user_group.cache.user_group_id
-  description = "User group every link user is added to"
+  value       = local.user_group_id == null ? "" : local.user_group_id
+  description = "User group every link user is added to; empty when the cache has no access control"
 }
 
 output "cache_name" {

@@ -66,3 +66,17 @@ setup() {
 	[ "$status" -eq 0 ]
 	assert_contains "$(captured TOFU_VARIABLES)" "-var=auth_mode=iam -var=cache_arn=arn:aws:elasticache:us-west-2:2:serverlesscache:np-my-cache-0f3a6"
 }
+
+@test "adds the link user to the user group the cache was created with" {
+	CONTEXT=$(link_context '{"valkey_arn":"arn:aws:elasticache:us-west-2:2:serverlesscache:np-my-cache-0f3a6","link_user_group_id":"my-team-group"}' '{}')
+	run_script build_permissions_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=user_group_id=my-team-group -var=user_name=np-orders-api-7d9e2-user -var=auth_mode=password"
+}
+
+@test "creates no user for a cache with no access control" {
+	CONTEXT=$(link_context '{"valkey_arn":"arn:aws:elasticache:us-west-2:2:serverlesscache:np-my-cache-0f3a6","link_user_group_id":""}' '{}')
+	run_script build_permissions_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=user_group_id= -var=user_name=np-orders-api-7d9e2-user -var=auth_mode=none"
+}

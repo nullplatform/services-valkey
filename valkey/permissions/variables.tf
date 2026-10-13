@@ -10,7 +10,13 @@ variable "region" {
 
 variable "user_group_id" {
   type        = string
-  description = "User group of the target cache, derived from the service by build_permissions_context"
+  default     = ""
+  description = "User group of the target cache, from the service attributes. Empty when the cache has no access control"
+
+  validation {
+    condition     = (var.user_group_id == "") == (var.auth_mode == "none")
+    error_message = "a link needs the cache's user group unless auth_mode is none, which has none"
+  }
 }
 
 variable "user_name" {
@@ -26,11 +32,11 @@ variable "user_name" {
 variable "auth_mode" {
   type        = string
   default     = "password"
-  description = "password for a VPC cache; iam for a public cache, which only accepts IAM-authenticated users"
+  description = "password for a VPC cache; iam for a public cache, which only accepts IAM-authenticated users; none for a cache with no access control"
 
   validation {
-    condition     = contains(["password", "iam"], var.auth_mode)
-    error_message = "auth_mode must be \"password\" or \"iam\""
+    condition     = contains(["password", "iam", "none"], var.auth_mode)
+    error_message = "auth_mode must be \"password\", \"iam\" or \"none\""
   }
 }
 

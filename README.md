@@ -9,11 +9,11 @@ Creates a serverless Valkey cache per service instance, reachable from inside th
 | Capability | Notes |
 | :---- | :---- |
 | Engine | Valkey 9 (default), 8 or 7, serverless: no node sizing, scales with usage. The major version can be upgraded, never downgraded |
-| Settings | Like the console: **Use default settings** or **Customize default settings**, which opens connectivity (network type, VPC and subnets), security (encryption key, security groups), backup and usage limits |
-| Connection type | **VPC** (default): placed in the VPC and subnets of the `vpc` provider, or the ones set in the customized settings; port 6379 open to the VPC CIDR only; the agent role can only touch security groups tagged `managed-by=nullplatform`. Customized security settings can select other security groups, which replace that default one. **Public** (Valkey 9 only): reachable over the internet, IAM authentication only. Fixed after creation |
+| Settings | Like the console: **Use default settings** or **Customize default settings**, which opens connectivity (network type, VPC and subnets, both required for a VPC cache), security (encryption key, access control, security groups), backup and usage limits |
+| Connection type | **VPC** (default): placed in the VPC and subnets of the `vpc` provider, or the ones the customized settings require; port 6379 open to the VPC CIDR only; the agent role can only touch security groups tagged `managed-by=nullplatform`. Customized security settings can select other security groups, which replace that default one. **Public** (Valkey 9 only): reachable over the internet, IAM authentication only. Fixed after creation |
 | Network type | IPv4 (default), dual stack or IPv6. Fixed after creation |
-| Authentication | RBAC user group per cache; one user per link: a password user on a VPC cache, an IAM-authenticated user on a public one |
-| Encryption | At rest with a dedicated KMS key per cache, an existing key chosen in the customized security settings, or a shared key given to the agent; in transit always. Fixed after creation |
+| Access control | Like the console: **No access control** (default), or **User group access control list** with an existing user group, to which each link adds its own user: a password user on a VPC cache, an IAM-authenticated user on a public one. A public cache only accepts IAM authentication, so without a selected group it gets one of its own. Fixed after creation |
+| Encryption | At rest with an AWS owned KMS key (default), a customer managed key chosen in the customized security settings, or a shared key given to the agent; in transit always. Caches created with a dedicated key keep it. Fixed after creation |
 | Backups | Optional daily automatic backups, kept 1-35 days, at a chosen UTC time |
 | Usage limits | Optional minimum and maximum for data storage (1-5,000 GB) and requests (1,000-15,000,000 ECPUs/s); 0 removes a single limit, "Not set" removes them all |
 | Tags | Your tags plus the platform's, which yours cannot override |
@@ -24,7 +24,7 @@ Creates a serverless Valkey cache per service instance, reachable from inside th
 
 | Link | What it does |
 | :---- | :---- |
-| `create-serverless-valkey-link` | Creates a Valkey user with full access (`on ~* +@all`) and adds it to the cache's user group. On a VPC cache it exports `user_name` and `user_password` (secret); on a public cache it also creates an IAM user allowed only to `elasticache:Connect` to this cache as this user, and exports its `access_key_id`, `secret_access_key` (secret), `aws_region` and `cache_name`. |
+| `create-serverless-valkey-link` | On a cache with no access control it creates nothing and exports only `connection_url`. Otherwise it creates a Valkey user with full access (`on ~* +@all`) and adds it to the cache's user group. On a VPC cache it exports `user_name` and `user_password` (secret); on a public cache it also creates an IAM user allowed only to `elasticache:Connect` to this cache as this user, and exports its `access_key_id`, `secret_access_key` (secret), `aws_region` and `cache_name`. |
 
 ## Layout
 
@@ -65,6 +65,7 @@ To apply it as a root module instead, copy `terraform.tfvars.example` to `terraf
 | :---- | :---- | :---- |
 | Caches | `elasticache:*` | Serverless caches, user groups and users named `np-*` |
 | Caches | `elasticache:CreateUserGroup`, `ModifyUserGroup`, `DeleteUserGroup`, `CreateServerlessCache`, `ModifyServerlessCache` | All users and user groups (needed to reference them) |
+| Caches | `elasticache:ModifyUserGroup` | All user groups, so links can join the one selected under User group access control list |
 | Caches | `elasticache:Describe*`, `ListTagsForResource` | `*` |
 | Caches | `iam:CreateServiceLinkedRole` | `AWSServiceRoleForElastiCache` only |
 | Network | `ec2:CreateSecurityGroup`, `CreateTags` and rule management | Security groups tagged `managed-by=nullplatform` |
@@ -100,7 +101,7 @@ module "vpc_provider" {
 
 A cache that already exists keeps the VPC, subnets and region recorded in its state, so changing the provider never replaces it.
 
-**5. Choose the encryption key.** Each cache gets its own KMS key by default and nothing else is needed. To put every cache on one existing key instead, give the agent its ARN in `VALKEY_KMS_KEY_ARN` and list the same ARN in the requirements module as `external_kms_key_arns`, which is what lets the role use it. The key is read only when the cache is created: ElastiCache cannot re-key a serverless cache, so changing the variable later leaves existing caches on the key they were created with.
+**5. Choose the encryption key.** Each cache is encrypted with an AWS owned key by default, as in the console, and nothing else is needed. A developer can choose a customer managed key in the customized security settings. To put every cache on one existing key instead, give the agent its ARN in `VALKEY_KMS_KEY_ARN` and list the same ARN in the requirements module as `external_kms_key_arns`, which is what lets the role use it. The key is read only when the cache is created: ElastiCache cannot re-key a serverless cache, so changing the variable later leaves existing caches on the key they were created with.
 
 **6. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list. The `specs/install` module subscribes the agent channel to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
 
@@ -110,7 +111,7 @@ Every service instance keeps its Terraform state in its own S3 bucket (`np-servi
 
 Before any AWS call, each workflow assumes the permissions role published in the IAM provider under the selector `valkey`, and every later step runs on the temporary credentials it returns. When the provider publishes no role for that selector, the agent keeps its own credentials and uses them directly — which is what makes local testing work, and what a setup that does not use assume-role relies on.
 
-The cache name is `np-<service slug>-<first 5 characters of the service id>`, capped at 36 characters so the derived user group (`-ug`) stays within the ElastiCache limit. It is computed once and then frozen in the service attributes (`cache_name`): renaming the service never renames the cache, and the link workflow reads the same attribute to find the user group it has to join. The `np-` prefix is what scopes the permissions role to caches created by nullplatform.
+The cache name is `np-<service slug>-<first 5 characters of the service id>`, capped at 36 characters so the derived user group (`-ug`) stays within the ElastiCache limit. It is computed once and then frozen in the service attributes (`cache_name`): renaming the service never renames the cache, and the link workflow reads `link_user_group_id`, which the service writes after each action, to find the user group it has to join (empty when the cache has no access control). The `np-` prefix is what scopes the permissions role to caches created by nullplatform.
 
 Each link user is named `np-<link slug>-<first 5 characters of the link id>-user`. On a VPC cache its password is generated by Terraform, stored only in the link's state and attributes, and delivered to the application as a secret environment variable. On a public cache the user has no password: the link creates an IAM user of the same name, and the application signs short-lived IAM tokens with its access key. Those IAM users live under the `/nullplatform/valkey/` path and must carry the `np-valkey-link-boundary` permissions boundary (created by the requirements module), which caps them at `elasticache:Connect`: the permissions role cannot create a link user without it, nor touch any IAM user outside that path.
 
@@ -149,9 +150,9 @@ Linked applications receive:
 | :---- | :---- | :---- |
 | `ENDPOINT` | service | Cache hostname |
 | `PORT` | service | `6379` |
-| `USER_NAME` | link | Valkey user for this link |
+| `USER_NAME` | link | Valkey user for this link; none with no access control |
 | `USER_PASSWORD` | link | secret |
-| `CONNECTION_URL` | link | `valkeys://<user>:<password>@<endpoint>:<port>`, secret. On a public cache, `valkeys://<user>@<endpoint>:<port>` |
+| `CONNECTION_URL` | link | `valkeys://<user>:<password>@<endpoint>:<port>`, secret. On a public cache, `valkeys://<user>@<endpoint>:<port>`; with no access control, `valkeys://<endpoint>:<port>` |
 | `ACCESS_KEY_ID` | link | public cache only: access key of the link's IAM user |
 | `SECRET_ACCESS_KEY` | link | public cache only, secret |
 | `AWS_REGION` | link | public cache only: region the IAM token is signed for |

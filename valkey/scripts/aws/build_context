@@ -80,8 +80,13 @@ require_network_ids() {
   done
 }
 
+# The cache's own name, or the user group the module created for it when a failed create left no cache.
 cache_name_from_state() {
-  jq -r '[.resources[]? | select(.mode == "managed" and .type == "aws_elasticache_user_group" and .name == "cache")][0].instances[0].attributes.user_group_id // "" | sub("-ug$"; "")' "$1"
+  jq -r '[.resources[]? | select(.mode == "managed")] as $resources
+    | ($resources | map(select(.type == "aws_elasticache_serverless_cache" and .name == "cache")) | .[0].instances[0].attributes.name)
+      // ($resources | map(select(.type == "awscc_elasticache_serverless_cache" and .name == "public")) | .[0].instances[0].attributes.serverless_cache_name)
+      // ($resources | map(select(.type == "aws_elasticache_user_group" and .name == "cache")) | .[0].instances[0].attributes.user_group_id // "" | sub("-ug$"; ""))
+      // ""' "$1"
 }
 
 resolve_cache_name() {
@@ -155,7 +160,13 @@ cache_from_state() {
     | select((.type == "aws_elasticache_serverless_cache" and .name == "cache") or (.type == "awscc_elasticache_serverless_cache" and .name == "public"))
     | {connection_type: (if .type == "awscc_elasticache_serverless_cache" then "public" else "vpc" end),
        engine_version: (.instances[0].attributes.major_engine_version // ""),
-       network_type: (.instances[0].attributes.network_type // "")}][0] // {}' "$1"
+       network_type: (.instances[0].attributes.network_type // ""),
+       user_group_id: (.instances[0].attributes.user_group_id // "")}][0] // {}' "$1"
+}
+
+# Caches created before the access control setting existed have a user group of their own.
+dedicated_user_group_in_state() {
+  jq -e '[.resources[]? | select(.mode == "managed" and .type == "aws_elasticache_user_group" and .name == "cache")] | length > 0' "$1" >/dev/null
 }
 
 user_tags_json() {
@@ -186,6 +197,13 @@ choice() {
   local key="$1" default="$2" value allowed
   shift 2
   value=$(attr_or "$key" "$default")
+  # Encryption choices stored before the AWS owned key was offered.
+  if [ "$key" = "encryption_key" ]; then
+    case "$value" in
+    dedicated) value=aws_owned ;;
+    existing) value=customer_managed ;;
+    esac
+  fi
   for allowed in "$@"; do
     if [ "$value" = "$allowed" ]; then
       echo "$value"
@@ -302,16 +320,18 @@ if [ "$CONNECTION_TYPE" = "vpc" ]; then
   VPC_ID=$(echo "$VPC_ATTRIBUTES" | jq -r '.vpc.id // ""')
   SUBNET_IDS=$(echo "$VPC_ATTRIBUTES" | jq -c '[(.vpc.subnets // [])[] | select(type == "string" and . != "")]')
 
-  # "Customize default settings" can place the cache in another VPC and subnets.
+  # "Customize default settings" places the cache in the VPC and subnets the developer chooses,
+  # like the console, which requires both. They are fixed after creation: a later update keeps
+  # the ones in the state.
   if [ "$SETTINGS_MODE" = "customize" ]; then
     OVERRIDE_VPC_ID=$(attr_or vpc_id "" | tr -d '[:space:]')
     OVERRIDE_SUBNET_IDS=$(echo "$SERVICE_ATTRS" | jq -c '
       def trim: gsub("^\\s+|\\s+$"; "");
       (.subnet_ids // []) | (if type == "string" then split(",") else . end)
       | map(tostring | trim | select(. != ""))')
-    if [ -n "$OVERRIDE_VPC_ID" ] || [ "$OVERRIDE_SUBNET_IDS" != "[]" ]; then
+    if [ -n "$OVERRIDE_VPC_ID" ] || [ "$OVERRIDE_SUBNET_IDS" != "[]" ] || [ "$(echo "$CONTEXT" | jq -r '.type // ""')" = "create" ]; then
       if [ -z "$OVERRIDE_VPC_ID" ] || [ "$OVERRIDE_SUBNET_IDS" = "[]" ]; then
-        echo "ERROR: set both vpc_id and subnet_ids to place the cache outside the vpc provider's network" >&2
+        echo "ERROR: the customized settings of a VPC cache require both vpc_id and subnet_ids" >&2
         exit 1
       fi
       VPC_ID="$OVERRIDE_VPC_ID"
@@ -404,6 +424,41 @@ if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$CONNECTION_TYPE" = "vpc" ]; the
     | map(tostring | trim | select(. != ""))')
 fi
 
+# Like the console: "No access control" binds no user group, "User group access control list"
+# binds an existing one, and each link adds its user to it. A public cache only accepts
+# IAM-authenticated users, so without a selected group it gets one of its own.
+ACCESS_CONTROL=none
+SELECTED_USER_GROUP_ID=""
+if [ "$SECURITY_SETTINGS" = "customize" ]; then
+  ACCESS_CONTROL=$(choice access_control none none user_group)
+fi
+if [ "$ACCESS_CONTROL" = "user_group" ]; then
+  SELECTED_USER_GROUP_ID=$(attr_or user_group_id "" | tr -d '[:space:]')
+  if [ -z "$SELECTED_USER_GROUP_ID" ]; then
+    echo "ERROR: user_group_id is required when access_control is user_group" >&2
+    exit 1
+  fi
+  if [[ ! "$SELECTED_USER_GROUP_ID" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
+    echo "ERROR: '${SELECTED_USER_GROUP_ID}' is not a user group ID" >&2
+    exit 1
+  fi
+fi
+DEDICATED_USER_GROUP=false
+if [ "$CONNECTION_TYPE" = "public" ] && [ -z "$SELECTED_USER_GROUP_ID" ]; then
+  DEDICATED_USER_GROUP=true
+fi
+
+# The access control is fixed after creation: links already hold users in the cache's group.
+if [ "$CACHE_EXISTS" = true ]; then
+  if dedicated_user_group_in_state "$STATE_FILE"; then
+    DEDICATED_USER_GROUP=true
+    SELECTED_USER_GROUP_ID=""
+  else
+    DEDICATED_USER_GROUP=false
+    SELECTED_USER_GROUP_ID=$(echo "$STATE_CACHE" | jq -r '.user_group_id')
+  fi
+fi
+
 SNAPSHOT_RETENTION_LIMIT=0
 DAILY_SNAPSHOT_TIME=""
 if [ "$SETTINGS_MODE" = "customize" ] && [ "$(choice automatic_backups disabled disabled enabled)" = "enabled" ]; then
@@ -445,6 +500,8 @@ jq -n \
   --argjson snapshot_retention_limit "$SNAPSHOT_RETENTION_LIMIT" \
   --arg daily_snapshot_time "$DAILY_SNAPSHOT_TIME" \
   --argjson usage_limits "$USAGE_LIMITS" \
+  --argjson dedicated_user_group "$DEDICATED_USER_GROUP" \
+  --arg user_group_id "$SELECTED_USER_GROUP_ID" \
   '{
     subnet_ids: $subnet_ids,
     tags: ($user + $platform),
@@ -452,27 +509,36 @@ jq -n \
     network_type: $network_type,
     security_group_ids: $security_group_ids,
     snapshot_retention_limit: $snapshot_retention_limit,
-    daily_snapshot_time: $daily_snapshot_time
+    daily_snapshot_time: $daily_snapshot_time,
+    dedicated_user_group: $dedicated_user_group,
+    user_group_id: $user_group_id
   } + $usage_limits' > "$TFVARS_FILE"
 
 TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=cache_name=${CACHE_NAME} -var=vpc_id=${VPC_ID} -var=engine_version=${ENGINE_VERSION} -var-file=${TFVARS_FILE}"
 
-# "Customize your security settings" can name an existing customer managed key instead of the
-# dedicated one; like the rest of the encryption settings, it only matters on create.
+# Like the console, the cache is encrypted with an AWS owned key unless "Customize your security
+# settings" chooses a customer managed key; like the rest of the encryption settings, it only
+# matters on create.
 FORM_KMS_KEY_ARN=""
-if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$(choice encryption_key dedicated dedicated existing)" = "existing" ]; then
+if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$(choice encryption_key aws_owned aws_owned customer_managed)" = "customer_managed" ]; then
   FORM_KMS_KEY_ARN=$(attr_or kms_key_arn "" | tr -d '[:space:]')
   if [ -z "$FORM_KMS_KEY_ARN" ]; then
-    echo "ERROR: kms_key_arn is required when encryption_key is existing" >&2
+    echo "ERROR: kms_key_arn is required when encryption_key is customer_managed" >&2
     exit 1
   fi
 fi
 
 KMS_KEY_ARN=$(resolve_kms_key_arn "$(echo "$CONTEXT" | jq -r '.type // ""')" "$STATE_KMS_KEY")
 
-if [ -n "$KMS_KEY_ARN" ]; then
-  echo "Using external KMS key: ${KMS_KEY_ARN}"
+if [ "$STATE_KMS_KEY" = "managed" ]; then
+  # A cache created before the AWS owned key was the default keeps the key made for it.
+  echo "Using the KMS key created for this cache"
+  TOFU_VARIABLES="${TOFU_VARIABLES} -var=dedicated_kms_key=true"
+elif [ -n "$KMS_KEY_ARN" ]; then
+  echo "Using customer managed KMS key: ${KMS_KEY_ARN}"
   TOFU_VARIABLES="${TOFU_VARIABLES} -var=kms_key_arn=${KMS_KEY_ARN}"
+else
+  echo "Using an AWS owned KMS key"
 fi
 
 export TOFU_VARIABLES

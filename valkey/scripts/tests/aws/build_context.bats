@@ -491,7 +491,18 @@ existing_cache() {
 	with_params '.parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: ""}'
 	run_script build_context
 	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "ERROR: set both vpc_id and subnet_ids"
+	assert_contains "$captured_stderr" "ERROR: the customized settings of a VPC cache require both vpc_id and subnet_ids"
+}
+
+@test "requires the VPC and subnets when a VPC cache is created with the customized settings" {
+	with_params '.type = "create" | .parameters += {settings_mode: "customize"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: the customized settings of a VPC cache require both vpc_id and subnet_ids"
+
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", connection_type: "public"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
 }
 
 @test "ignores the network override while the default settings are selected" {
@@ -501,23 +512,30 @@ existing_cache() {
 	assert_equal "$(captured VPC_ID)" "vpc-0123"
 }
 
-@test "uses the existing key chosen in the security settings instead of a dedicated one, and requires its ARN" {
-	with_params '.type = "create" | .parameters += {settings_mode: "customize", security_settings: "customize", encryption_key: "existing", kms_key_arn: " arn:aws:kms:us-west-2:111122223333:key/abc "}'
+@test "uses the customer managed key chosen in the security settings, and requires its ARN" {
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: "subnet-0aa", security_settings: "customize", encryption_key: "customer_managed", kms_key_arn: " arn:aws:kms:us-west-2:111122223333:key/abc "}'
 	run_script build_context
 	[ "$status" -eq 0 ]
 	assert_contains "$(captured TOFU_VARIABLES)" "-var=kms_key_arn=arn:aws:kms:us-west-2:111122223333:key/abc"
 
-	with_params '.type = "create" | .parameters += {settings_mode: "customize", security_settings: "customize", encryption_key: "existing", kms_key_arn: ""}'
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: "subnet-0aa", security_settings: "customize", encryption_key: "customer_managed", kms_key_arn: ""}'
 	run_script build_context
 	[ "$status" -ne 0 ]
-	assert_contains "$captured_stderr" "ERROR: kms_key_arn is required when encryption_key is existing"
+	assert_contains "$captured_stderr" "ERROR: kms_key_arn is required when encryption_key is customer_managed"
+
+	# The value stored before the AWS owned key was offered still means a customer managed key.
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: "subnet-0aa", security_settings: "customize", encryption_key: "existing", kms_key_arn: "arn:aws:kms:us-west-2:111122223333:key/abc"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=kms_key_arn=arn:aws:kms:us-west-2:111122223333:key/abc"
 }
 
-@test "keeps the dedicated key while the default security settings are selected" {
-	with_params '.type = "create" | .parameters += {settings_mode: "customize", security_settings: "default", encryption_key: "existing", kms_key_arn: "arn:aws:kms:us-west-2:111122223333:key/abc"}'
+@test "keeps the AWS owned key while the default security settings are selected" {
+	with_params '.type = "create" | .parameters += {settings_mode: "customize", vpc_id: "vpc-0abc", subnet_ids: "subnet-0aa", security_settings: "default", encryption_key: "customer_managed", kms_key_arn: "arn:aws:kms:us-west-2:111122223333:key/abc"}'
 	run_script build_context
 	[ "$status" -eq 0 ]
 	assert_not_contains "$(captured TOFU_VARIABLES)" "kms_key_arn"
+	assert_contains "$captured_stdout" "Using an AWS owned KMS key"
 }
 
 @test "replaces the default security group with the selected ones, from a list or a comma-separated string" {
@@ -616,4 +634,70 @@ existing_cache() {
 	[ "$status" -eq 0 ]
 	assert_contains "$(captured TOFU_VARIABLES)" "-var=engine_version=9"
 	assert_equal "$(tfvars '.connection_type')" '"public"'
+}
+
+@test "has no access control by default, and binds the user group selected in the security settings" {
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[false,""]'
+
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", access_control: "user_group", user_group_id: " my-team-group "}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[false,"my-team-group"]'
+
+	with_params '.parameters += {settings_mode: "customize", security_settings: "default", access_control: "user_group", user_group_id: "my-team-group"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '.user_group_id')" '""'
+}
+
+@test "requires a well-formed user group with the user group access control list" {
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", access_control: "user_group", user_group_id: ""}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: user_group_id is required when access_control is user_group"
+
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", access_control: "user_group", user_group_id: "x -var=y"}'
+	run_script build_context
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "is not a user group ID"
+}
+
+@test "gives a public cache a user group of its own unless one is selected" {
+	with_params '.parameters += {connection_type: "public"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[true,""]'
+
+	with_params '.parameters += {connection_type: "public", settings_mode: "customize", security_settings: "customize", access_control: "user_group", user_group_id: "my-team-group"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[false,"my-team-group"]'
+}
+
+@test "keeps the user group and the key of a cache created before, whatever the form says" {
+	existing_cache aws_elasticache_serverless_cache cache '{"major_engine_version":"9"}'
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", access_control: "user_group", user_group_id: "my-team-group"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[true,""]'
+	assert_contains "$(captured TOFU_VARIABLES)" "-var=dedicated_kms_key=true"
+	assert_not_contains "$(captured TOFU_VARIABLES)" "-var=kms_key_arn"
+}
+
+@test "keeps the access control an existing cache was created with" {
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"name":"np-my-cache-0f3a6","major_engine_version":"9","subnet_ids":["subnet-a","subnet-b"],"user_group_id":"my-team-group"}}]}]}'
+	with_params '.parameters += {settings_mode: "default"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[false,"my-team-group"]'
+	assert_equal "$(captured CACHE_NAME)" "np-my-cache-0f3a6"
+	assert_contains "$captured_stdout" "Using an AWS owned KMS key"
+
+	export MOCK_STATE_JSON='{"resources":[{"mode":"managed","type":"aws_elasticache_serverless_cache","name":"cache","instances":[{"attributes":{"name":"np-my-cache-0f3a6","major_engine_version":"9","subnet_ids":["subnet-a","subnet-b"]}}]}]}'
+	with_params '.parameters += {settings_mode: "customize", security_settings: "customize", access_control: "user_group", user_group_id: "my-team-group"}'
+	run_script build_context
+	[ "$status" -eq 0 ]
+	assert_equal "$(tfvars '[.dedicated_user_group, .user_group_id]')" '[false,""]'
 }

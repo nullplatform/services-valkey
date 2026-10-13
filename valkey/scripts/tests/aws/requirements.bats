@@ -58,3 +58,9 @@ setup() {
 	assert_contains "$(grep 'link_boundary_name *=' "$LOCALS")" 'valkey-link-boundary"'
 	assert_contains "$(grep 'link_boundary_arn *=' "$SERVICE_PATH/permissions/locals.tf")" 'np-valkey-link-boundary"'
 }
+
+@test "a selected user group can only gain link users: the role cannot create or delete it" {
+	block=$(grep -A6 'Sid      = "AddLinkUsersToSelectedUserGroups"' "$MAIN")
+	assert_contains "$block" 'Action   = ["elasticache:ModifyUserGroup"]'
+	assert_contains "$block" 'Resource = local.all_elasticache_usergroups_arn'
+}

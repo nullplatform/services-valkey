@@ -116,14 +116,28 @@ verify_connectivity() {
 
 verify_encryption() {
   section "Encryption"
-  if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$(attr encryption_key dedicated)" = "existing" ]; then
-    check "existing customer managed key" "$(attr kms_key_arn | tr -d '[:space:]')" "$(cache '.KmsKeyId')"
+  local choice dedicated
+  choice=$(attr encryption_key aws_owned)
+  if [ "$SECURITY_SETTINGS" = "customize" ] && { [ "$choice" = "customer_managed" ] || [ "$choice" = "existing" ]; }; then
+    check "customer managed key" "$(attr kms_key_arn | tr -d '[:space:]')" "$(cache '.KmsKeyId')"
     return
   fi
-  local dedicated
+  # Caches created before the AWS owned key was the default keep the key made for them.
   dedicated=$(aws kms describe-key --key-id "alias/nullplatform-valkey-${CACHE_NAME}" --region "$REGION" \
     --query 'KeyMetadata.Arn' --output text 2>/dev/null || true)
-  check "dedicated customer managed key" "$dedicated" "$(cache '.KmsKeyId')"
+  if [ -n "$dedicated" ] && [ "$dedicated" != "None" ]; then
+    check "dedicated customer managed key" "$dedicated" "$(cache '.KmsKeyId')"
+  else
+    check "AWS owned key" "" "$(cache '.KmsKeyId // ""')"
+  fi
+}
+
+verify_access_control() {
+  section "Access control"
+  check "user group" "$(jq -r '.attributes.link_user_group_id // ""' <<< "$SERVICE")" "$(cache '.UserGroupId // ""')"
+  if [ "$SECURITY_SETTINGS" = "customize" ] && [ "$(attr access_control none)" = "user_group" ]; then
+    check "selected user group" "$(attr user_group_id | tr -d '[:space:]')" "$(cache '.UserGroupId // ""')"
+  fi
 }
 
 verify_backups() {
@@ -177,7 +191,7 @@ verify_link() {
 
   user=$(aws elasticache describe-users --user-id "$user_name" --region "$REGION" --output json | jq -c '.Users[0]')
   groups=$(jq -r '.UserGroupIds | join(",")' <<< "$user")
-  check "valkey user in the cache's group" "${CACHE_NAME}-ug" "$groups"
+  check "valkey user in the cache's group" "$(jq -r '.attributes.link_user_group_id // ""' <<< "$SERVICE")" "$groups"
   check "valkey user access" "on ~* +@all" "$(jq -r '.AccessString' <<< "$user")"
 
   if [ "$CONNECTION_TYPE" = "public" ]; then
@@ -201,6 +215,7 @@ printf 'Service %s -> cache %s (%s, %s)\n' "$SERVICE_ID" "$CACHE_NAME" "$CONNECT
 verify_identity
 verify_connectivity
 verify_encryption
+verify_access_control
 verify_backups
 verify_usage_limits
 verify_tags

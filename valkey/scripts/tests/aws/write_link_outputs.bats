@@ -68,3 +68,10 @@ setup() {
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "ERROR: the IAM user was created but its access key could not be read."
 }
+
+@test "hands out only the connection url for a cache with no access control" {
+	export MOCK_TOFU_OUTPUTS='{"user_name":{"value":""},"user_password":{"value":"","sensitive":true},"auth_mode":{"value":"none"}}'
+	run_script write_link_outputs
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" 'np link patch --id 7d9e2f10-1234-4abc-9def-0123456789ab --body {"attributes": {"connection_url":"valkeys://np-my-cache-0f3a6-abc.serverless.usw2.cache.amazonaws.com:6379"}}'
+}

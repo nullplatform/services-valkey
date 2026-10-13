@@ -17,11 +17,17 @@ locals {
     for association in data.aws_vpc.cache[0].ipv6_cidr_block_associations : association.ipv6_cidr_block
   ])) : []
 
-  kms_key_arn         = var.kms_key_arn != null ? var.kms_key_arn : aws_kms_key.cache[0].arn
+  # Like the console, the cache is encrypted with an AWS owned key unless a customer managed key
+  # is given. Caches created before keep the dedicated key the module made for them.
+  kms_key_arn         = var.dedicated_kms_key ? aws_kms_key.cache[0].arn : var.kms_key_arn
   daily_snapshot_time = var.daily_snapshot_time == "" ? null : var.daily_snapshot_time
 
   data_storage_limited = var.data_storage_minimum_gb != null || var.data_storage_maximum_gb != null
   ecpu_limited         = var.ecpu_minimum != null || var.ecpu_maximum != null
+
+  # "No access control" binds no user group. "User group access control list" binds the selected
+  # one. A public cache and the caches created before keep a user group of their own.
+  user_group_id = var.dedicated_user_group ? aws_elasticache_user_group.cache[0].user_group_id : (var.user_group_id == "" ? null : var.user_group_id)
 }
 
 moved {
@@ -32,6 +38,11 @@ moved {
 moved {
   from = aws_security_group.cache
   to   = aws_security_group.cache[0]
+}
+
+moved {
+  from = aws_elasticache_user_group.cache
+  to   = aws_elasticache_user_group.cache[0]
 }
 
 moved {
@@ -74,7 +85,7 @@ resource "aws_security_group" "cache" {
 }
 
 resource "aws_kms_key" "cache" {
-  count = var.kms_key_arn == null ? 1 : 0
+  count = var.dedicated_kms_key ? 1 : 0
 
   description         = "Customer managed key for the ${var.cache_name} Valkey serverless cache"
   enable_key_rotation = true
@@ -83,13 +94,15 @@ resource "aws_kms_key" "cache" {
 }
 
 resource "aws_kms_alias" "cache" {
-  count = var.kms_key_arn == null ? 1 : 0
+  count = var.dedicated_kms_key ? 1 : 0
 
   name          = "alias/nullplatform-valkey-${var.cache_name}"
   target_key_id = aws_kms_key.cache[0].key_id
 }
 
 resource "aws_elasticache_user_group" "cache" {
+  count = var.dedicated_user_group ? 1 : 0
+
   engine        = "valkey"
   user_group_id = "${var.cache_name}-ug"
 
@@ -107,7 +120,7 @@ resource "aws_elasticache_serverless_cache" "cache" {
   name                 = var.cache_name
   description          = "${var.cache_name} Valkey serverless cache"
   major_engine_version = var.engine_version
-  user_group_id        = aws_elasticache_user_group.cache.user_group_id
+  user_group_id        = local.user_group_id
   kms_key_id           = local.kms_key_arn
   security_group_ids   = local.default_security_group ? [aws_security_group.cache[0].id] : var.security_group_ids
   subnet_ids           = var.subnet_ids
@@ -150,7 +163,7 @@ resource "awscc_elasticache_serverless_cache" "public" {
   connection_type       = "public"
   network_type          = var.network_type
   # Public caches only accept IAM-authenticated users: every link user of this group is one.
-  user_group_id = aws_elasticache_user_group.cache.user_group_id
+  user_group_id = local.user_group_id
   kms_key_id    = local.kms_key_arn
 
   snapshot_retention_limit = var.snapshot_retention_limit

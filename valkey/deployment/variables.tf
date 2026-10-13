@@ -49,7 +49,45 @@ variable "tags" {
 variable "kms_key_arn" {
   type        = string
   default     = null
-  description = "ARN of an existing KMS key for the cache's at-rest encryption. When null, the module creates a dedicated key for this cache."
+  description = "ARN of a customer managed KMS key for the cache's at-rest encryption. Null encrypts with an AWS owned key"
+}
+
+variable "dedicated_kms_key" {
+  type        = bool
+  default     = false
+  description = "Create a KMS key for this cache, as the module did before the AWS owned key was the default. Only caches that already have one keep it"
+
+  validation {
+    condition     = !(var.dedicated_kms_key && var.kms_key_arn != null)
+    error_message = "set either kms_key_arn or dedicated_kms_key, not both"
+  }
+}
+
+variable "dedicated_user_group" {
+  type        = bool
+  default     = false
+  description = "Create a user group for this cache. A public cache needs one when no user group is selected; caches created before keep theirs"
+}
+
+variable "user_group_id" {
+  type        = string
+  default     = ""
+  description = "Existing user group selected under User group access control list. Empty with dedicated_user_group false means no access control"
+
+  validation {
+    condition     = var.user_group_id == "" || can(regex("^[a-zA-Z][a-zA-Z0-9-]*$", var.user_group_id))
+    error_message = "user_group_id must start with a letter and contain only letters, digits and hyphens"
+  }
+
+  validation {
+    condition     = !(var.dedicated_user_group && var.user_group_id != "")
+    error_message = "set either user_group_id or dedicated_user_group, not both"
+  }
+
+  validation {
+    condition     = var.connection_type == "vpc" || var.dedicated_user_group || var.user_group_id != ""
+    error_message = "a public cache only accepts IAM-authenticated users, so it needs a user group"
+  }
 }
 
 variable "engine_version" {

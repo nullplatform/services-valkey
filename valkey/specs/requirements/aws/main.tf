@@ -42,6 +42,15 @@ resource "aws_iam_policy" "nullplatform_valkey" {
         Resource = local.all_elasticache_users_arn
       },
       {
+        # "User group access control list" binds a user group the developer selects, which need
+        # not be named np-*: each link adds its own user to it. Only membership changes, never
+        # creating or deleting another group.
+        Sid      = "AddLinkUsersToSelectedUserGroups"
+        Effect   = "Allow"
+        Action   = ["elasticache:ModifyUserGroup"]
+        Resource = local.all_elasticache_usergroups_arn
+      },
+      {
         Sid    = "BindCachesToUserGroups"
         Effect = "Allow"
         Action = [

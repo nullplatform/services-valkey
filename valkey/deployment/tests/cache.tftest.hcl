@@ -44,8 +44,12 @@ run "vpc_defaults" {
     error_message = "defaults: Valkey 9 over IPv4"
   }
   assert {
-    condition     = aws_elasticache_serverless_cache.cache[0].kms_key_id == "arn:aws:kms:us-west-2:111122223333:key/own" && length(aws_kms_key.cache) == 1 && aws_elasticache_serverless_cache.cache[0].snapshot_retention_limit == 0
-    error_message = "defaults: a dedicated KMS key for the cache and no automatic backups"
+    condition     = aws_elasticache_serverless_cache.cache[0].kms_key_id == null && length(aws_kms_key.cache) == 0 && aws_elasticache_serverless_cache.cache[0].snapshot_retention_limit == 0
+    error_message = "defaults: an AWS owned key and no automatic backups"
+  }
+  assert {
+    condition     = aws_elasticache_serverless_cache.cache[0].user_group_id == null && length(aws_elasticache_user_group.cache) == 0 && output.user_group_id == ""
+    error_message = "defaults: no access control, so no user group"
   }
   assert {
     condition     = length(aws_elasticache_serverless_cache.cache[0].cache_usage_limits) == 0
@@ -70,6 +74,7 @@ run "vpc_customized" {
     engine_version           = "8"
     network_type             = "dual_stack"
     kms_key_arn              = "arn:aws:kms:us-west-2:111122223333:key/abc"
+    user_group_id            = "my-team-group"
     security_group_ids       = ["sg-extra"]
     snapshot_retention_limit = 7
     daily_snapshot_time      = "04:30"
@@ -83,7 +88,11 @@ run "vpc_customized" {
   }
   assert {
     condition     = aws_elasticache_serverless_cache.cache[0].kms_key_id == "arn:aws:kms:us-west-2:111122223333:key/abc" && length(aws_kms_key.cache) == 0 && aws_elasticache_serverless_cache.cache[0].network_type == "dual_stack" && aws_elasticache_serverless_cache.cache[0].major_engine_version == "8"
-    error_message = "an existing customer managed key replaces the dedicated one; the network type and engine reach the cache"
+    error_message = "a customer managed key encrypts the cache; the network type and engine reach the cache"
+  }
+  assert {
+    condition     = aws_elasticache_serverless_cache.cache[0].user_group_id == "my-team-group" && length(aws_elasticache_user_group.cache) == 0 && output.user_group_id == "my-team-group"
+    error_message = "the selected user group is bound to the cache, and no group of its own is created"
   }
   assert {
     condition     = aws_elasticache_serverless_cache.cache[0].snapshot_retention_limit == 7 && aws_elasticache_serverless_cache.cache[0].daily_snapshot_time == "04:30"
@@ -114,6 +123,7 @@ run "public" {
   variables {
     engine_version           = "9"
     connection_type          = "public"
+    dedicated_user_group     = true
     vpc_id                   = ""
     subnet_ids               = []
     security_group_ids       = ["sg-ignored"]
@@ -152,11 +162,46 @@ run "public" {
   }
 }
 
+run "caches_created_before_keep_their_key_and_user_group" {
+  variables {
+    dedicated_kms_key    = true
+    dedicated_user_group = true
+  }
+  assert {
+    condition     = aws_elasticache_serverless_cache.cache[0].kms_key_id == "arn:aws:kms:us-west-2:111122223333:key/own" && length(aws_kms_key.cache) == 1 && length(aws_kms_alias.cache) == 1
+    error_message = "a cache created with a dedicated key keeps it"
+  }
+  assert {
+    condition     = aws_elasticache_serverless_cache.cache[0].user_group_id == "np-my-cache-0f3a6-ug" && output.user_group_id == "np-my-cache-0f3a6-ug"
+    error_message = "a cache created with its own user group keeps it"
+  }
+}
+
+run "public_requires_a_user_group" {
+  command = plan
+  variables {
+    connection_type = "public"
+    vpc_id          = ""
+    subnet_ids      = []
+  }
+  expect_failures = [var.user_group_id]
+}
+
+run "rejects_a_key_and_a_dedicated_key_together" {
+  command = plan
+  variables {
+    dedicated_kms_key = true
+    kms_key_arn       = "arn:aws:kms:us-west-2:111122223333:key/abc"
+  }
+  expect_failures = [var.dedicated_kms_key]
+}
+
 run "public_requires_valkey_9" {
   command = plan
   variables {
-    engine_version  = "8"
-    connection_type = "public"
+    engine_version       = "8"
+    connection_type      = "public"
+    dedicated_user_group = true
   }
   expect_failures = [var.connection_type]
 }

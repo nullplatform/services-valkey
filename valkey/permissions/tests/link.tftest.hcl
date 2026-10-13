@@ -26,7 +26,7 @@ variables {
 
 run "password_user_by_default" {
   assert {
-    condition     = length(aws_elasticache_user.link.passwords) == 1 && length(aws_elasticache_user.link.authentication_mode) == 0
+    condition     = length(aws_elasticache_user.link[0].passwords) == 1 && length(aws_elasticache_user.link[0].authentication_mode) == 0
     error_message = "a VPC cache link gets a password user"
   }
   assert {
@@ -45,11 +45,11 @@ run "iam_user_for_a_public_cache" {
     cache_arn = "arn:aws:elasticache:us-west-2:111122223333:serverlesscache:np-my-cache-0f3a6"
   }
   assert {
-    condition     = aws_elasticache_user.link.passwords == null && aws_elasticache_user.link.authentication_mode[0].type == "iam"
+    condition     = aws_elasticache_user.link[0].passwords == null && aws_elasticache_user.link[0].authentication_mode[0].type == "iam"
     error_message = "a public cache link gets an IAM-authenticated user with no password"
   }
   assert {
-    condition     = aws_elasticache_user.link.user_id == aws_elasticache_user.link.user_name
+    condition     = aws_elasticache_user.link[0].user_id == aws_elasticache_user.link[0].user_name
     error_message = "IAM authentication needs the user id to equal the user name"
   }
   assert {
@@ -93,4 +93,27 @@ run "rejects_an_unknown_auth_mode" {
     auth_mode = "token"
   }
   expect_failures = [var.auth_mode]
+}
+
+run "no_user_for_a_cache_without_access_control" {
+  variables {
+    auth_mode     = "none"
+    user_group_id = ""
+  }
+  assert {
+    condition     = length(aws_elasticache_user.link) == 0 && length(aws_elasticache_user_group_association.link) == 0 && length(random_password.link) == 0 && length(aws_iam_user.link) == 0
+    error_message = "a cache with no access control has no user group, so the link creates no user"
+  }
+  assert {
+    condition     = output.user_name == "" && output.user_password == "" && output.access_key_id == ""
+    error_message = "a link with no access control hands out no credentials"
+  }
+}
+
+run "a_user_needs_the_cache_user_group" {
+  command = plan
+  variables {
+    user_group_id = ""
+  }
+  expect_failures = [var.user_group_id]
 }

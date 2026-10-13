@@ -131,7 +131,27 @@
                           "condition": {
                             "scope": "#/properties/encryption_key",
                             "schema": {
-                              "const": "existing"
+                              "const": "customer_managed"
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "Control",
+                        "scope": "#/properties/access_control",
+                        "options": {
+                          "format": "radio"
+                        }
+                      },
+                      {
+                        "type": "Control",
+                        "scope": "#/properties/user_group_id",
+                        "rule": {
+                          "effect": "SHOW",
+                          "condition": {
+                            "scope": "#/properties/access_control",
+                            "schema": {
+                              "const": "user_group"
                             }
                           }
                         }
@@ -305,6 +325,15 @@
           "editableOn": [],
           "description": "Internal cache name, fixed after creation"
         },
+        "link_user_group_id": {
+          "type": "string",
+          "title": "Link user group",
+          "export": false,
+          "readOnly": true,
+          "visibleOn": [],
+          "editableOn": [],
+          "description": "User group each link adds its user to, empty with no access control (auto-populated after creation)"
+        },
         "engine_version": {
           "type": "string",
           "title": "Engine version",
@@ -347,7 +376,7 @@
           "oneOf": [
             {
               "const": "default",
-              "title": "Use default settings: IPv4, a customer managed key created for this cache, default security group, automatic backups off, no usage limits"
+              "title": "Use default settings: IPv4, the VPC and subnets of the vpc provider, an AWS owned KMS key, no access control, default security group, automatic backups off, no usage limits"
             },
             {
               "const": "customize",
@@ -388,21 +417,21 @@
         },
         "vpc_id": {
           "type": "string",
-          "title": "VPC ID - optional",
+          "title": "VPC ID",
           "editableOn": [
             "create"
           ],
-          "description": "The VPC the cache runs in. Leave empty to use the one of the vpc provider. Fixed after creation.",
+          "description": "The VPC the cache runs in. Required with the customized settings of a VPC cache. Fixed after creation.",
           "order": 8,
           "pattern": "^vpc-[0-9a-f]+$"
         },
         "subnet_ids": {
           "type": "string",
-          "title": "Subnet IDs - optional",
+          "title": "Subnet IDs",
           "editableOn": [
             "create"
           ],
-          "description": "Comma-separated subnets, one per Availability Zone you will access the cache from; we recommend the AZs where your application is deployed. Leave empty to use the subnets of the vpc provider. Fixed after creation.",
+          "description": "Comma-separated subnets, one per Availability Zone you will access the cache from; we recommend the AZs where your application is deployed. Required with the customized settings of a VPC cache. Fixed after creation.",
           "order": 9,
           "pattern": "^\\s*subnet-[0-9a-f]+(\\s*,\\s*subnet-[0-9a-f]+)*\\s*$"
         },
@@ -412,7 +441,7 @@
           "oneOf": [
             {
               "const": "default",
-              "title": "Default security settings: a customer managed key created for this cache, encryption in transit, default security group"
+              "title": "Default security settings: an AWS owned KMS key, encryption in transit, no access control, default security group"
             },
             {
               "const": "customize",
@@ -432,30 +461,60 @@
           "title": "Encryption key",
           "oneOf": [
             {
-              "const": "dedicated",
-              "title": "Customer managed key created for this cache"
+              "const": "aws_owned",
+              "title": "AWS owned KMS key"
             },
             {
-              "const": "existing",
-              "title": "Existing customer managed key"
+              "const": "customer_managed",
+              "title": "Customer managed key"
             }
           ],
-          "default": "dedicated",
+          "default": "aws_owned",
           "editableOn": [
             "create"
           ],
-          "description": "The KMS key that protects the data at rest. By default the service creates a dedicated customer managed key, with rotation, for each cache. Fixed after creation.",
+          "description": "The master key that will be used to protect the key used to encrypt data at rest. Fixed after creation.",
           "order": 11
         },
         "kms_key_arn": {
           "type": "string",
-          "title": "KMS key ARN",
+          "title": "AWS KMS key",
           "pattern": "^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$",
           "editableOn": [
             "create"
           ],
-          "description": "ARN of an existing customer managed KMS key, in the same region as the cache. The permissions role must be allowed to use it.",
+          "description": "This key is used for encryption instead of the default key. ARN of a customer managed KMS key in the same region as the cache; the permissions role must be allowed to use it.",
           "order": 12
+        },
+        "access_control": {
+          "type": "string",
+          "title": "Access control",
+          "oneOf": [
+            {
+              "const": "none",
+              "title": "No access control"
+            },
+            {
+              "const": "user_group",
+              "title": "User group access control list"
+            }
+          ],
+          "default": "none",
+          "editableOn": [
+            "create"
+          ],
+          "description": "Provides the ability to configure authenticating and authorizing access. With no access control, every link connects without a user or password. A public cache only accepts IAM authentication: without a user group, it gets one of its own. Fixed after creation.",
+          "order": 13
+        },
+        "user_group_id": {
+          "type": "string",
+          "title": "User group",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9-]*$",
+          "editableOn": [
+            "create"
+          ],
+          "description": "Create user groups that are available for use on any of your ElastiCache caches. You can then add users to the user group. ID of an existing Valkey user group: each link adds its own user to it.",
+          "order": 14
         },
         "security_group_ids": {
           "type": "array",
@@ -470,7 +529,7 @@
             "update"
           ],
           "description": "Security groups that act as a firewall for the cache. They replace the default security group, which only allows Valkey (port 6379) from inside the VPC. VPC caches only.",
-          "order": 13
+          "order": 15
         },
         "automatic_backups": {
           "type": "string",
@@ -491,7 +550,7 @@
             "update"
           ],
           "description": "A backup holds the cache's metadata and data. It can restore a cache or seed a new one.",
-          "order": 14
+          "order": 16
         },
         "backup_retention_days": {
           "type": "integer",
@@ -504,7 +563,7 @@
             "update"
           ],
           "description": "Days each automatic backup is kept. 35 days maximum.",
-          "order": 15
+          "order": 17
         },
         "backup_window_start": {
           "type": "string",
@@ -515,7 +574,7 @@
             "update"
           ],
           "description": "Time the daily backup starts, as HH:MM in UTC. Leave empty to let AWS choose; once set it can be changed but not emptied.",
-          "order": 16
+          "order": 18
         },
         "usage_limits": {
           "type": "string",
@@ -536,7 +595,7 @@
             "update"
           ],
           "description": "Choose a minimum or maximum data storage and requests limits for your cache. Choosing Not set again removes every limit.",
-          "order": 17
+          "order": 19
         },
         "data_storage_minimum_gb": {
           "type": "integer",
@@ -548,7 +607,7 @@
             "update"
           ],
           "description": "Minimum cached data capacity, from 1 GB. When set, the cache is billed for at least this much. 0 means no limit.",
-          "order": 18
+          "order": 20
         },
         "data_storage_maximum_gb": {
           "type": "integer",
@@ -560,7 +619,7 @@
             "update"
           ],
           "description": "Maximum cached data capacity, up to 5,000 GB. The cache does not scale beyond it. 0 means no limit.",
-          "order": 19
+          "order": 21
         },
         "ecpu_minimum": {
           "type": "integer",
@@ -572,7 +631,7 @@
             "update"
           ],
           "description": "Minimum ECPUs per second, from 1,000. 0 means no limit.",
-          "order": 20
+          "order": 22
         },
         "ecpu_maximum": {
           "type": "integer",
@@ -584,7 +643,7 @@
             "update"
           ],
           "description": "Maximum ECPUs per second, up to 15,000,000. The cache does not scale beyond it. 0 means no limit.",
-          "order": 21
+          "order": 23
         },
         "tags": {
           "type": "array",
@@ -610,7 +669,7 @@
             "create",
             "update"
           ],
-          "order": 22
+          "order": 24
         }
       }
     },

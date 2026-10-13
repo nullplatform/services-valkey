@@ -1,5 +1,7 @@
 locals {
-  iam = var.auth_mode == "iam"
+  iam      = var.auth_mode == "iam"
+  password = var.auth_mode == "password"
+  user     = var.auth_mode != "none"
 
   # Must match specs/requirements/aws: the permissions role may only create link users under this
   # path, and only with this boundary, which caps them at elasticache:Connect.

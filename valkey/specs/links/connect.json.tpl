@@ -17,7 +17,6 @@
       "type": "object",
       "$schema": "http://json-schema.org/draft-07/schema#",
       "required": [
-        "user_name",
         "connection_url"
       ],
       "properties": {
@@ -30,7 +29,7 @@
             "read"
           ],
           "editableOn": [],
-          "description": "Valkey user created for this link (auto-populated after link creation)",
+          "description": "Valkey user created for this link (auto-populated after link creation). Empty when the cache has no access control",
           "order": 1
         },
         "user_password": {
@@ -60,7 +59,7 @@
             "read"
           ],
           "editableOn": [],
-          "description": "Ready-to-use TLS connection string for the link user (auto-populated, delivered as secret env var). On a public cache it carries no password: send an IAM token signed with the link's access key instead",
+          "description": "Ready-to-use TLS connection string for the link user (auto-populated, delivered as secret env var). On a public cache it carries no password: send an IAM token signed with the link's access key instead. On a cache with no access control it carries no user either",
           "order": 3
         },
         "access_key_id": {

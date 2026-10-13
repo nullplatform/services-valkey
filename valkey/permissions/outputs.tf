@@ -1,17 +1,17 @@
 output "user_name" {
-  value       = aws_elasticache_user.link.user_name
-  description = "Valkey user created for this link"
+  value       = local.user ? aws_elasticache_user.link[0].user_name : ""
+  description = "Valkey user created for this link, empty when the cache has no access control"
 }
 
 output "user_password" {
-  value       = local.iam ? "" : random_password.link.result
+  value       = local.password ? random_password.link[0].result : ""
   sensitive   = true
-  description = "Password of the link user, empty for an IAM link"
+  description = "Password of the link user, empty for an IAM link or a cache with no access control"
 }
 
 output "auth_mode" {
   value       = var.auth_mode
-  description = "password or iam"
+  description = "password, iam or none"
 }
 
 output "access_key_id" {
