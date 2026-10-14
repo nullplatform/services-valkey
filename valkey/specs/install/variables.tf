@@ -3,12 +3,6 @@ variable "nrn" {
   type        = string
 }
 
-variable "api_key" {
-  description = "nullplatform API key the agent uses to authenticate the notification channel."
-  type        = string
-  sensitive   = true
-}
-
 variable "repository_branch" {
   description = "Pinned git ref of this repository the specs are read from. Must be a tag or commit SHA, never a moving branch."
   type        = string
