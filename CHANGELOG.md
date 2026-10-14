@@ -9,6 +9,19 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.6.0](https://github.com/nullplatform/services-valkey/compare/v0.5.1...v0.6.0) (2026-10-14)
+
+
+### Features
+
+* **valkey:** add the console's cache settings, the public connection type and tags ([e2df77f](https://github.com/nullplatform/services-valkey/commit/e2df77f51cc538051ac8a53997c7b38c3adc3138))
+* **valkey:** add the console's cache settings, the public connection type and tags ([159107b](https://github.com/nullplatform/services-valkey/commit/159107b75e0907ca257fd4aba18a8553be767b37))
+
+
+### Bug Fixes
+
+* **valkey:** match the console's network, encryption and access control settings ([e12faa2](https://github.com/nullplatform/services-valkey/commit/e12faa277a18c491c2404005da3f0b8ebc61aff3))
+
 ## [0.5.1](https://github.com/nullplatform/services-valkey/compare/v0.5.0...v0.5.1) (2026-10-06)
 
 
