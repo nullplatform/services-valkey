@@ -17,3 +17,8 @@ output "metrics_policy_arn" {
   description = "ARN of the CloudWatch read policy attached to the agent roles for the service metrics"
   value       = local.attach_metrics_policy ? aws_iam_policy.nullplatform_valkey_metrics[0].arn : ""
 }
+
+output "link_boundary_policy_arn" {
+  description = "Permissions boundary every link IAM user (public caches) must carry"
+  value       = local.iam_create ? aws_iam_policy.link_boundary[0].arn : ""
+}

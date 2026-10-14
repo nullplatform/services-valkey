@@ -1,0 +1,16 @@
+nrn               = "" # e.g. organization=<org>:account=<account>:namespace=<namespace>
+np_api_key        = ""
+repository_branch = "" # a release tag, e.g. v1.0.0
+
+tags_selectors = {
+  "environment" = ""
+}
+
+# service_name          = "Serverless Valkey"
+# repository_org        = "nullplatform"
+# repository_name       = "services-valkey"
+# repository_ref_type   = "tags"
+# repository_token      = "" # needed to read the specs from a private repository
+# base_clone_path       = "/home/agent/.np"
+# extra_visible_to_nrns = ["organization=<org>:account=<other account>"]
+# dimensions            = { environment = { required = true } }

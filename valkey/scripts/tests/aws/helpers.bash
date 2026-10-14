@@ -26,13 +26,14 @@ setup_mocks() {
 	fi
 	export MOCK_CW_RESPONSE
 	export MOCK_LIST_VERSIONS="${MOCK_LIST_VERSIONS:-null}"
+	export MOCK_DESCRIBE_CACHE="${MOCK_DESCRIBE_CACHE:-}"
 	export MOCK_STATE_JSON="${MOCK_STATE_JSON-missing}"
 	export MOCK_CACHE_STATUSES="${MOCK_CACHE_STATUSES-gone}"
 	if [ -z "${MOCK_CACHE_TAGS+set}" ]; then
 		MOCK_CACHE_TAGS='{"TagList":[{"Key":"managed-by","Value":"nullplatform"},{"Key":"service-id","Value":"0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718"}]}'
 	fi
 	export MOCK_CACHE_TAGS
-	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH
+	unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTION_SOURCE NOTIFICATION_ACTION OVERRIDES_PATH SERVICE_ACTION_TYPE
 	export VALKEY_S3_STATE_BUCKET="${VALKEY_S3_STATE_BUCKET-np-valkey-state}"
 
 	cat > "$MOCK_BIN/aws" <<'MOCK'
@@ -77,6 +78,10 @@ case "$*" in
 			case "$arg" in file://*) [ -f "${arg#file://}" ] || { echo "missing delete file" >&2; exit 1; } ;; esac
 		done ;;
 	*"elasticache describe-serverless-caches"*)
+		if [ -n "$MOCK_DESCRIBE_CACHE" ]; then
+			echo "$MOCK_DESCRIBE_CACHE"
+			exit 0
+		fi
 		calls=$(grep -c "elasticache describe-serverless-caches" "$MOCK_LOG")
 		read -ra statuses <<<"$MOCK_CACHE_STATUSES"
 		index=$((calls - 1))
@@ -134,6 +139,8 @@ MOCK
 #!/bin/bash
 echo "tofu $*" >> "$MOCK_LOG"
 case "$1" in
+	# do_tofu checks the version first: without an answer it would install a real tofu and run it.
+	version) echo "OpenTofu v1.12.6" ;;
 	output) echo "$MOCK_TOFU_OUTPUTS" ;;
 	init|apply|destroy) exit "$MOCK_TOFU_EXIT" ;;
 esac

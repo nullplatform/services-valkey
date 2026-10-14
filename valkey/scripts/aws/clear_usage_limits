@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+
+# Tofu cannot remove a usage limit: the providers keep a limit that is no longer set, and the aws
+# provider rejects 0. AWS clears a limit when it is sent as 0, so after the apply this step sends
+# every limit group that still holds a limit the developer removed, with the removed ones as 0.
+
+yaml_value() {
+  local key="$1" default="$2" file="$3"
+  local val
+  val=$(grep "^${key}:" "$file" 2>/dev/null | sed 's/^[^:]*: *//;s/^"//;s/"$//' | head -1)
+  echo "${val:-$default}"
+}
+
+AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
+if [ -n "$AWS_PROFILE_VAL" ]; then
+  export AWS_PROFILE="$AWS_PROFILE_VAL"
+fi
+
+if [ -z "${CACHE_NAME:-}" ]; then
+  echo "ERROR: CACHE_NAME is not set. build_context must run before this script." >&2
+  exit 1
+fi
+
+DESIRED=$(jq -c '{
+  DataStorage: {Minimum: .data_storage_minimum_gb, Maximum: .data_storage_maximum_gb},
+  ECPUPerSecond: {Minimum: .ecpu_minimum, Maximum: .ecpu_maximum}
+}' "$OUTPUT_DIR/terraform.tfvars.json")
+
+CURRENT=$(aws elasticache describe-serverless-caches \
+  --serverless-cache-name "$CACHE_NAME" --region "$REGION" --output json \
+  | jq -c '.ServerlessCaches[0].CacheUsageLimits // {}')
+
+CLEAR=$(jq -cn --argjson desired "$DESIRED" --argjson current "$CURRENT" '
+  def held: . != null and . != 0;
+  [ "DataStorage", "ECPUPerSecond" ][] as $group
+  | select(any(["Minimum", "Maximum"][]; ($current[$group][.] | held) and $desired[$group][.] == null))
+  | {($group): ({Minimum: ($desired[$group].Minimum // 0), Maximum: ($desired[$group].Maximum // 0)}
+      + (if $group == "DataStorage" then {Unit: "GB"} else {} end))}
+' | jq -sc 'add // {}')
+
+if [ "$CLEAR" = "{}" ]; then
+  echo "No removed usage limits to clear."
+  exit 0
+fi
+
+echo "Clearing removed usage limits on ${CACHE_NAME}: ${CLEAR}"
+aws elasticache modify-serverless-cache \
+  --serverless-cache-name "$CACHE_NAME" --region "$REGION" \
+  --cache-usage-limits "$CLEAR" >/dev/null

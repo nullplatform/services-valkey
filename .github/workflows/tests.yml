@@ -11,3 +11,29 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: bash tests/do_tofu_version.sh valkey/scripts/aws/do_tofu
+
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y bats jq
+      - run: bats valkey/scripts/tests/aws/ valkey/utils/tests/
+
+  tofu-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.6
+      - run: |
+          set -e
+          for dir in valkey/deployment valkey/permissions valkey/specs/requirements/aws; do
+            tofu fmt -check "$dir"
+            tofu -chdir="$dir" init -backend=false -input=false
+            tofu -chdir="$dir" validate
+          done
+          # The modules with mocked-provider tests: no credentials, nothing created.
+          for dir in valkey/deployment valkey/permissions valkey/specs/requirements/aws; do
+            tofu -chdir="$dir" test
+          done
