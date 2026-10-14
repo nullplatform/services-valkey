@@ -33,7 +33,8 @@ valkey/
 ├── specs/
 │   ├── service-spec.json.tpl      # attributes shown to the developer
 │   ├── links/connect.json.tpl
-│   └── requirements/aws/          # IAM role the agent assumes
+│   ├── requirements/aws/          # IAM role the agent assumes
+│   └── install/aws/               # guide: service definition and agent association
 ├── deployment/                    # security group, KMS key, user group and the cache (aws, or awscc for a public cache)
 ├── permissions/                   # link: per-link user (password, or IAM user and access key)
 ├── scripts/aws/                   # context building and tofu execution
@@ -103,11 +104,20 @@ A cache that already exists keeps the VPC, subnets and region recorded in its st
 
 **5. Choose the encryption key.** Each cache is encrypted with an AWS owned key by default, as in the console, and nothing else is needed. A developer can choose a customer managed key in the customized security settings. To put every cache on one existing key instead, give the agent its ARN in `VALKEY_KMS_KEY_ARN` and list the same ARN in the requirements module as `external_kms_key_arns`, which is what lets the role use it. The key is read only when the cache is created: ElastiCache cannot re-key a serverless cache, so changing the variable later leaves existing caches on the key they were created with.
 
-**6. Register the service.** Point a `service_definition` at this repository with `service_path = "valkey"`, and add it to the agent's repository list. The `specs/install` module subscribes the agent channel to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
+**6. Register the service.** Copy `valkey/specs/install/aws` into your infrastructure and apply it there: it registers the service definition and the agent association that routes the service's actions to your agents. It declares no provider; see [its README](valkey/specs/install/README.md).
+
+```bash
+cp -r valkey/specs/install/aws /path/to/your/infra/serverless-valkey
+cd /path/to/your/infra/serverless-valkey
+cp terraform.tfvars.example terraform.tfvars   # nrn, np_api_key, repository_branch (a release tag), tags_selectors
+tofu init && tofu apply
+```
+
+Its notification channel subscribes to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
 
 ## How it works
 
-Every service instance keeps its Terraform state in its own S3 bucket (`np-service-<service-id>`), created on demand and removed when the service is deleted. Links use the same bucket under a separate key, so creating or removing a link never touches the cache state.
+Every service instance keeps its Terraform state in the shared state bucket under its own prefix (`services/valkey/<service id>/`), and the delete workflow removes that prefix. Links use separate keys under the same prefix, so creating or removing a link never touches the cache state.
 
 Before any AWS call, each workflow assumes the permissions role published in the IAM provider under the selector `valkey`, and every later step runs on the temporary credentials it returns. When the provider publishes no role for that selector, the agent keeps its own credentials and uses them directly — which is what makes local testing work, and what a setup that does not use assume-role relies on.
 
