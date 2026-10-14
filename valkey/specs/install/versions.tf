@@ -2,7 +2,7 @@ terraform {
   required_providers {
     nullplatform = {
       source  = "nullplatform/nullplatform"
-      version = ">= 0.0.102, < 0.1.0"
+      version = ">= 0.0.107, < 0.1.0"
     }
     http = {
       source  = "hashicorp/http"

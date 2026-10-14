@@ -15,11 +15,13 @@ module "service_definition" {
   dimensions             = var.dimensions
 }
 
+# No api_key: nullplatform creates and manages the channel's credential, scoped
+# to dispatching commands to agents. The identity running the apply must be able
+# to assign the controlplane:agent-dispatcher role (admin, ops or secops).
 module "agent_association" {
-  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=b70e69a99366dea5dedc0e7bd1b9960954f39b8a"
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=v8.7.0"
 
   nrn                          = var.nrn
-  api_key                      = var.api_key
   tags_selectors               = var.agent_tags_selectors
   service_specification_slug   = module.service_definition.service_specification_slug
   repository_service_spec_repo = var.repository_name

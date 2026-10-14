@@ -1,5 +1,4 @@
 nrn                  = "organization=123:account=456"
-api_key              = "<nullplatform api key>"
 repository_branch    = "v1.0.0"
 agent_tags_selectors = { service = "serverless-valkey" }
 
