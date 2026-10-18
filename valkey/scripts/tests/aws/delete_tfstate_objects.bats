@@ -51,3 +51,21 @@ setup() {
 	[ "$status" -ne 0 ]
 	assert_contains "$captured_stderr" "ERROR: TFSTATE_KEY_PREFIX is not set."
 }
+
+@test "deletes only the link state when TFSTATE_LINK_PREFIX is set" {
+	export TFSTATE_LINK_PREFIX="services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/links/7d9e2f10-1234-4abc-9def-0123456789ab.tfstate"
+	export MOCK_LIST_VERSIONS='[{"Key":"services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/links/7d9e2f10-1234-4abc-9def-0123456789ab.tfstate","VersionId":"v1"}]'
+	run_script delete_tfstate_objects
+	[ "$status" -eq 0 ]
+	assert_contains "$(cat "$MOCK_LOG")" "--prefix services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/links/7d9e2f10-1234-4abc-9def-0123456789ab.tfstate"
+	assert_not_contains "$(cat "$MOCK_LOG")" "--prefix services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/ "
+	assert_contains "$captured_stdout" "State under services/valkey/0f3a6b1e-9c2d-4e8f-a1b2-c3d4e5f60718/links/7d9e2f10-1234-4abc-9def-0123456789ab.tfstate deleted."
+}
+
+@test "fails instead of matching the whole bucket when TFSTATE_LINK_PREFIX is empty" {
+	export TFSTATE_LINK_PREFIX=""
+	run_script delete_tfstate_objects
+	[ "$status" -ne 0 ]
+	assert_contains "$captured_stderr" "ERROR: TFSTATE_LINK_PREFIX is set to an empty value"
+	assert_not_contains "$(cat "$MOCK_LOG")" "delete-objects"
+}
