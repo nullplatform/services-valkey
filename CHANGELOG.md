@@ -9,6 +9,14 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.6.2](https://github.com/nullplatform/services-valkey/compare/v0.6.1...v0.6.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** bump nullplatform/scopes/worker-bridge from 2.0.3 to 2.0.6 ([185302c](https://github.com/nullplatform/services-valkey/commit/185302c881e95d5fd9d33ab976813abb4363150e))
+* **deps:** bump nullplatform/scopes/worker-bridge from 2.0.3 to 2.0.6 ([9097ef0](https://github.com/nullplatform/services-valkey/commit/9097ef0238d343fd7b8a7aa9ec49d7efee9e10d6))
+
 ## [0.6.1](https://github.com/nullplatform/services-valkey/compare/v0.6.0...v0.6.1) (2026-10-14)
 
 
