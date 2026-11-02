@@ -9,6 +9,13 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.6.5](https://github.com/nullplatform/services-valkey/compare/v0.6.4...v0.6.5) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** bump opentofu/setup-opentofu from 1 to 2 ([#46](https://github.com/nullplatform/services-valkey/issues/46)) ([ba1dc12](https://github.com/nullplatform/services-valkey/commit/ba1dc12879f321a66fab6bc9a5826509998a1ddb))
+
 ## [0.6.4](https://github.com/nullplatform/services-valkey/compare/v0.6.3...v0.6.4) (2026-11-02)
 
 
