@@ -13,6 +13,10 @@ setup_mocks() {
 	export MOCK_BUCKET_EXISTS="${MOCK_BUCKET_EXISTS:-0}"
 	export MOCK_TOFU_OUTPUTS="${MOCK_TOFU_OUTPUTS:-{\}}"
 	export MOCK_TOFU_EXIT="${MOCK_TOFU_EXIT:-0}"
+	# The tofu mock reports the version do_tofu pins, so a bump of the pin never
+	# leaves the mock behind it ("requires OpenTofu X or newer").
+	MOCK_TOFU_VERSION="${MOCK_TOFU_VERSION:-$(sed -n 's/^[[:space:]]*TOFU_VERSION="\([0-9.]*\)".*/\1/p' "$SCRIPTS_DIR/do_tofu" | head -1)}"
+	export MOCK_TOFU_VERSION
 	if [ -z "${MOCK_NP_CLOUD_PROVIDERS+set}" ]; then
 		MOCK_NP_CLOUD_PROVIDERS='{"results":[{"attributes":{"account":{"region":"us-west-2"}}}]}'
 	fi
@@ -140,7 +144,7 @@ MOCK
 echo "tofu $*" >> "$MOCK_LOG"
 case "$1" in
 	# do_tofu checks the version first: without an answer it would install a real tofu and run it.
-	version) echo "OpenTofu v1.12.6" ;;
+	version) echo "OpenTofu v${MOCK_TOFU_VERSION}" ;;
 	output) echo "$MOCK_TOFU_OUTPUTS" ;;
 	init|apply|destroy) exit "$MOCK_TOFU_EXIT" ;;
 esac
