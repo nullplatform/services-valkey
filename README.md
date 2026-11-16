@@ -33,8 +33,8 @@ valkey/
 ├── specs/
 │   ├── service-spec.json.tpl      # attributes shown to the developer
 │   ├── links/connect.json.tpl
-│   ├── requirements/aws/          # IAM role the agent assumes
-│   └── install/aws/               # guide: service definition and agent association
+│   └── requirements/aws/          # IAM role the agent assumes
+├── publish/                       # publishes the service as a package (release workflow only)
 ├── deployment/                    # security group, KMS key, user group and the cache (aws, or awscc for a public cache)
 ├── permissions/                   # link: per-link user (password, or IAM user and access key)
 ├── scripts/aws/                   # context building and tofu execution
@@ -46,21 +46,58 @@ valkey/
 └── values.yaml                    # static config, not exposed in the UI
 ```
 
-## Installation
+## Install in your organization
 
-**1. Create the permissions role.** Apply `valkey/specs/requirements/aws` in the target AWS account:
+The service is published once as the package `np-serverless-valkey` (specification "Serverless Valkey"), visible to every organization. You do not copy its specs: you install the package and use it read-only.
+
+How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to this service.
+
+Installing it touches the same three layers as registering a service yourself, and only the nullplatform layer changes:
+
+| Layer | What | Module |
+|---|---|---|
+| infrastructure (AWS credentials) | The IAM role the service assumes, the metrics policy of the agent role, and the state bucket every Valkey service shares | [`valkey/specs/requirements/aws`](./valkey/specs/requirements/aws) |
+| nullplatform (nullplatform API key) | The installation of the package and the agent channel | tofu-modules' `service_package_installation` |
+| bindings | The role under selector `valkey` in your IAM provider | your `aws-iam-configuration` provider |
+
+Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/services-valkey/releases)) and use its version in both places below: the IAM role is the one the worker of that same release expects.
 
 ```hcl
+# ── infrastructure layer ─────────────────────────────────────────────
 module "valkey_requirements" {
-  source            = "git::https://github.com/nullplatform/services-valkey.git//valkey/specs/requirements/aws?ref=main"
+  source            = "git::https://github.com/nullplatform/services-valkey.git//valkey/specs/requirements/aws?ref=vX.Y.Z"
   cluster_name      = "<nullplatform agent cluster>"
   state_bucket_name = "<existing S3 bucket for the tofu state>"
+  # external_kms_key_arns: see "The encryption key" below. The optional
+  # variables are listed with their defaults in its terraform.tfvars.example.
 }
+
+# The agent role must be allowed to assume it: add it to the assume_role_arns
+# of tofu-modules' infrastructure/aws/iam/agent.
+#   assume_role_arns = [..., module.valkey_requirements.permissions_role_arn]
+
+# ── nullplatform layer ───────────────────────────────────────────────
+# The same module a catalog entry with `install_package` becomes. For a
+# service the installation is the whole nullplatform side, channel included.
+module "valkey" {
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_package_installation?ref=v9.16.0"
+
+  nrn                  = var.nrn
+  package_slug         = "np-serverless-valkey"
+  package_version      = "X.Y.Z" # the same release, without the v
+  agent_tags_selectors = { cluster = "runtime" } # must match the agent's TAGS
+}
+# Keeping channels in a separate bindings layer instead? Use
+# nullplatform/package_installation here and service_definition_agent_association
+# there, with package_slug = "np-serverless-valkey".
+
+# ── bindings layer ───────────────────────────────────────────────────
+# One aws-iam-configuration per NRN and dimensions: add the entry to the list
+# your IAM provider already has.
+#   { selector = "valkey", arn = module.valkey_requirements.permissions_role_arn }
 ```
 
-To apply it as a root module instead, copy `terraform.tfvars.example` to `terraform.tfvars` and fill it in — it lists every variable, with the optional ones commented out at their defaults.
-
-**Permissions to request.** These are the permissions the module grants. In an account that does not use assume role, grant them to the agent role instead.
+**The permissions the role gets.** These are the permissions the module grants. In an account that does not use assume role, grant them to the agent role instead.
 
 | Area | Actions | Scope |
 | :---- | :---- | :---- |
@@ -78,13 +115,9 @@ To apply it as a root module instead, copy `terraform.tfvars.example` to `terraf
 
 The agent role itself always needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role, so they cost a single AWS call. The module attaches that policy to `agent_role_arn` and `additional_agent_role_arns`; set `attach_metrics_policy_to_agent_roles = false` if the agent role is managed elsewhere.
 
-**2. Publish the role.** Register `permissions_role_arn` in the nullplatform AWS IAM provider under the selector **`valkey`**, and allow the agent role to assume it.
+**The state bucket.** Create a single S3 bucket that every Valkey service shares for its tofu state, enable versioning on it, and pass its name to the requirements module as `state_bucket_name`. The agent must receive the same name in the environment variable `VALKEY_S3_STATE_BUCKET`. The service never creates or deletes this bucket: if it is missing, every action fails with a clear error. Each service keeps its state under `services/valkey/<service id>/terraform.tfstate`, and each of its links under `services/valkey/<service id>/links/<link id>.tfstate`. Deleting a service removes that prefix and nothing else.
 
-**3. Create the state bucket.** Create a single S3 bucket that every valkey service shares for its tofu state, enable versioning on it, and pass its name to the requirements module as `state_bucket_name`. The agent must receive the same name in the environment variable `VALKEY_S3_STATE_BUCKET`. The service never creates or deletes this bucket: if it is missing, every action fails with a clear error.
-
-Each service keeps its state under `services/valkey/<service id>/terraform.tfstate`, and each of its links under `services/valkey/<service id>/links/<link id>.tfstate`. Deleting a service removes that prefix and nothing else.
-
-**4. Configure the network.** The service reads the region and the network from nullplatform providers, looked up for the service NRN and its dimensions:
+**The network.** The service reads the region and the network from nullplatform providers, looked up for the service NRN and its dimensions:
 
 - **`aws-configuration`** (`cloud-providers` category, from `tofu-modules//nullplatform/cloud/aws/cloud`) — `account.region`.
 - **`aws-networking-configuration`** (`vpc` category, from `tofu-modules//nullplatform/cloud/aws/vpc`) — `vpc.id`, and in `vpc.subnets` the private subnets the cache is placed in.
@@ -102,18 +135,15 @@ module "vpc_provider" {
 
 A cache that already exists keeps the VPC, subnets and region recorded in its state, so changing the provider never replaces it.
 
-**5. Choose the encryption key.** Each cache is encrypted with an AWS owned key by default, as in the console, and nothing else is needed. A developer can choose a customer managed key in the customized security settings. To put every cache on one existing key instead, give the agent its ARN in `VALKEY_KMS_KEY_ARN` and list the same ARN in the requirements module as `external_kms_key_arns`, which is what lets the role use it. The key is read only when the cache is created: ElastiCache cannot re-key a serverless cache, so changing the variable later leaves existing caches on the key they were created with.
+**The encryption key.** Each cache is encrypted with an AWS owned key by default, as in the console, and nothing else is needed. A developer can choose a customer managed key in the customized security settings. To put every cache on one existing key instead, give the agent its ARN in `VALKEY_KMS_KEY_ARN` and list the same ARN in the requirements module as `external_kms_key_arns`, which is what lets the role use it. The key is read only when the cache is created: ElastiCache cannot re-key a serverless cache, so changing the variable later leaves existing caches on the key they were created with.
 
-**6. Register the service.** Copy `valkey/specs/install/aws` into your infrastructure and apply it there: it registers the service definition and the agent association that routes the service's actions to your agents. It declares no provider; see [its README](valkey/specs/install/README.md).
+The service assumes the role it finds under selector `valkey` in the IAM provider closest to its NRN. To upgrade, move the release in both layers: `ref` of the requirements module and `package_version` of the installation. See tofu-modules' [`service_package_installation`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/service_package_installation) for its inputs and outputs. The channel it creates subscribes to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
 
-```bash
-cp -r valkey/specs/install/aws /path/to/your/infra/serverless-valkey
-cd /path/to/your/infra/serverless-valkey
-cp terraform.tfvars.example terraform.tfvars   # nrn, np_api_key, repository_branch (a release tag), tags_selectors
-tofu init && tofu apply
-```
+Prerequisites: an agent whose `TAGS` match the channel's `tags_selectors`, with `public.ecr.aws/nullplatform/*` in `worker.allowedRegistries` and `np-serverless-valkey` in its `worker_orchestrated_packages` (the worker then runs with the agent's identity, the one the role trusts), and the `aws-configuration` and `aws-networking-configuration` providers of "The network" at the NRN or above it.
 
-Its notification channel subscribes to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
+## How the package is published
+
+Every release publishes a new revision of the package from this repository, in the same run that pushes the worker image ([`.github/workflows/release.yml`](./.github/workflows/release.yml)): the `publish-package` job applies [`valkey/publish`](./valkey/publish), a stack on tofu-modules' `service_package_publish`, which pins this tag's specs and the image by digest. The package version is the release tag, as for the image. The stack keeps its state where the organization secrets `PACKAGE_STATE_AWS_ACCOUNT_ID`, `PACKAGE_TFSTATE_BUCKET` and `PACKAGE_TFSTATE_REGION` point; the state role is `github-actions-<repository>-package-state` in that account, by convention.
 
 ## How it works
 
